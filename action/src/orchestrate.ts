@@ -20,6 +20,7 @@ import {
   type GitHubGlobalAdvisory,
 } from "../../packages/github/src";
 import type { TelegraphClient } from "../../packages/telegraph/src";
+import type { SafeTelegraphRequestRecord } from "../../packages/ledger/src/types";
 import { aggregateDecisions } from "./aggregate";
 import type {
   ActionPullRequestContext,
@@ -119,7 +120,7 @@ function uniqueReviewReasons(reasons: string[]): string[] {
 function createRunResult(
   context: ActionPullRequestContext,
   policy: LimenPolicy,
-  values: Pick<LimenRunResult, "runId" | "decisions" | "evaluatedCves" | "skippedCves" | "telegraphRequestCount" | "telegraphCostUsd" | "budgetExceeded" | "missingCveCount" | "runReasons" | "evaluatedAt">,
+  values: Pick<LimenRunResult, "runId" | "decisions" | "evaluatedCves" | "skippedCves" | "telegraphRequestCount" | "telegraphCostUsd" | "telegraphRequests" | "budgetExceeded" | "missingCveCount" | "runReasons" | "evaluatedAt" | "startedAt" | "completedAt">,
 ): LimenRunResult {
   const aggregate = aggregateDecisions(values.decisions, {
     budgetExceeded: values.budgetExceeded,
@@ -195,7 +196,8 @@ export async function orchestrateLimenRun(
 ): Promise<LimenRunResult> {
   const now = input.dependencies.now ?? (() => new Date());
   const runId = input.dependencies.createRunId?.() ?? `LM-${randomUUID()}`;
-  const evaluatedAt = now().toISOString();
+  const startedAt = now().toISOString();
+  const evaluatedAt = startedAt;
   const sleep = input.dependencies.sleep;
 
   let changes: GitHubDependencyChange[];
@@ -214,10 +216,13 @@ export async function orchestrateLimenRun(
         skippedCves: [],
         telegraphRequestCount: 0,
         telegraphCostUsd: 0,
+        telegraphRequests: [],
         budgetExceeded: false,
         missingCveCount: 0,
         runReasons: ["DEPENDENCY_SNAPSHOT_UNAVAILABLE"],
         evaluatedAt,
+        startedAt,
+        completedAt: now().toISOString(),
       });
     }
     throw error;
@@ -287,6 +292,7 @@ export async function orchestrateLimenRun(
   );
   const telegraphCache = new Map<string, TelegraphEvidenceInput>();
   const decisions = [] as LimenRunResult["decisions"];
+  const telegraphRequests = [] as SafeTelegraphRequestRecord[];
   let telegraphRequestCount = 0;
   let telegraphCostUsd = 0;
 
@@ -302,6 +308,7 @@ export async function orchestrateLimenRun(
         telegraphEvidence = { status: "failed", code: "TELEGRAPH_PAYMENT_ERROR" };
       } else {
         telegraphRequestCount += 1;
+        const requestedAt = now().toISOString();
         try {
           const evidence: TelegraphCveEvidence = await telegraphClient.lookupCve({
             cveId,
@@ -313,8 +320,36 @@ export async function orchestrateLimenRun(
           if (evidence.costUsd !== null && Number.isFinite(evidence.costUsd) && evidence.costUsd >= 0) {
             telegraphCostUsd += evidence.costUsd;
           }
+          telegraphRequests.push({
+            cveId,
+            intent: "CVE_LOOKUP",
+            minerId: evidence.minerId,
+            minerName: evidence.minerName,
+            costUsd: evidence.costUsd,
+            durationMs: evidence.durationMs,
+            network: evidence.network,
+            paymentScheme: evidence.paymentScheme,
+            requestedAt: evidence.requestedAt,
+            receivedAt: evidence.receivedAt,
+            outcome: "success",
+            settlementReference: null,
+          });
         } catch (error) {
           telegraphEvidence = telegraphFailureInput(error);
+          telegraphRequests.push({
+            cveId,
+            intent: "CVE_LOOKUP",
+            minerId: null,
+            minerName: null,
+            costUsd: null,
+            durationMs: null,
+            network: null,
+            paymentScheme: null,
+            requestedAt,
+            receivedAt: now().toISOString(),
+            outcome: "failed",
+            settlementReference: null,
+          });
         }
       }
       telegraphCache.set(cveId, telegraphEvidence);
@@ -338,9 +373,12 @@ export async function orchestrateLimenRun(
     skippedCves,
     telegraphRequestCount,
     telegraphCostUsd,
+    telegraphRequests,
     budgetExceeded,
     missingCveCount,
     runReasons: uniqueReviewReasons(runReasons),
     evaluatedAt,
+    startedAt,
+    completedAt: now().toISOString(),
   });
 }

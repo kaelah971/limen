@@ -1,5 +1,7 @@
 import * as actionsCore from "@actions/core";
 import { ConfigurationError } from "../../packages/core/src";
+import { LedgerUsageClassSchema } from "../../packages/ledger/src";
+import type { LedgerUsageClass } from "../../packages/ledger/src";
 import type { ActionInputs } from "./types";
 
 export interface ActionInputReader {
@@ -27,6 +29,17 @@ export function parseMaxLookups(value: string): number {
   return parsed;
 }
 
+export function parseUsageClass(value: string): LedgerUsageClass {
+  const parsed = LedgerUsageClassSchema.safeParse(value.trim() || "production");
+  if (!parsed.success) {
+    throw new ConfigurationError(
+      "usage-class must be production, demo, development, or test.",
+      { field: "usage-class" },
+    );
+  }
+  return parsed.data;
+}
+
 export function readActionInputs(
   reader: ActionInputReader = actionsCore,
   environment: Record<string, string | undefined> = process.env,
@@ -48,8 +61,18 @@ export function readActionInputs(
 
   const inputEngineUrl = reader.getInput("telegraph-engine-url").trim();
   const inputNetwork = reader.getInput("expected-network").trim();
+  const inputLedgerUrl = reader.getInput("ledger-url").trim();
+  const inputLedgerToken = reader.getInput("ledger-token").trim();
+  const inputUsageClass = reader.getInput("usage-class").trim();
   const environmentEngineUrl = environment.TELEGRAPH_ENGINE_URL?.trim();
   const environmentNetwork = environment.TELEGRAPH_EXPECTED_NETWORK?.trim();
+  const environmentLedgerUrl = environment.LIMEN_LEDGER_URL?.trim();
+  const environmentLedgerToken = environment.LIMEN_LEDGER_TOKEN?.trim();
+  const environmentUsageClass = environment.LIMEN_USAGE_CLASS?.trim();
+  const ledgerToken = inputLedgerToken || environmentLedgerToken || undefined;
+  if (ledgerToken !== undefined) {
+    reader.setSecret(ledgerToken);
+  }
 
   return {
     githubToken,
@@ -61,5 +84,10 @@ export function readActionInputs(
       ? { expectedNetwork: inputNetwork || environmentNetwork }
       : {}),
     maxLookups: parseMaxLookups(reader.getInput("max-lookups") || "5"),
+    ...(inputLedgerUrl || environmentLedgerUrl
+      ? { ledgerUrl: inputLedgerUrl || environmentLedgerUrl }
+      : {}),
+    ...(ledgerToken === undefined ? {} : { ledgerToken }),
+    usageClass: parseUsageClass(inputUsageClass || environmentUsageClass || "production"),
   };
 }

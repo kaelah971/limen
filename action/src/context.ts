@@ -21,6 +21,8 @@ export interface ParsePullRequestContextInput {
   owner: string;
   repo: string;
   actor?: string;
+  githubRunId?: number;
+  githubRunAttempt?: number;
 }
 
 function requiredContextValue(value: string, field: string): string {
@@ -63,6 +65,22 @@ export function parsePullRequestContext(
   const repo = requiredContextValue(input.repo, "repo");
   const actor = input.actor?.trim() || parsed.data.sender?.login?.trim() || pullRequest.user?.login?.trim() || "unknown";
   const authorAssociation = pullRequest.author_association?.trim().toUpperCase() || "UNKNOWN";
+  if (
+    input.githubRunId !== undefined &&
+    (!Number.isSafeInteger(input.githubRunId) || input.githubRunId <= 0)
+  ) {
+    throw new GitHubConfigurationError("GitHub Action run ID must be a positive integer.", {
+      field: "github.run_id",
+    });
+  }
+  if (
+    input.githubRunAttempt !== undefined &&
+    (!Number.isSafeInteger(input.githubRunAttempt) || input.githubRunAttempt <= 0)
+  ) {
+    throw new GitHubConfigurationError("GitHub Action run attempt must be a positive integer.", {
+      field: "github.run_attempt",
+    });
+  }
 
   return {
     owner,
@@ -74,5 +92,7 @@ export function parsePullRequestContext(
     actor,
     eventName: input.eventName,
     authorAssociation,
+    ...(input.githubRunId === undefined ? {} : { githubRunId: input.githubRunId }),
+    ...(input.githubRunAttempt === undefined ? {} : { githubRunAttempt: input.githubRunAttempt }),
   };
 }

@@ -1,6 +1,6 @@
 # Limen Security Model
 
-P0 protects the external payment/evidence boundary. P1 keeps the decision evaluator pure. P2 treats repository policy as untrusted configuration. P4 adds read-only GitHub ingestion. P3 orchestrates those boundaries in a bundled Action without persistence or release authentication.
+P0 protects the external payment/evidence boundary. P1 keeps the decision evaluator pure. P2 treats repository policy as untrusted configuration. P4 adds read-only GitHub ingestion. P3 orchestrates those boundaries in a bundled Action. P5 adds optional server-owned persistence without moving credentials into the Action or changing release-decision semantics.
 
 ## Secrets
 
@@ -36,6 +36,16 @@ The Action requires only `contents: read` in its reference workflow and does not
 
 `limen.yml` is parsed with a mature YAML library using core schema semantics and duplicate-key rejection. P2 permits only the bounded snake_case policy shape, rejects unknown keys and unsupported values, does not execute tags or expand environment values, and requires explicit risk appetite fields. Uncertainty settings safely default to `review`. Policy versions hash canonical effective content rather than source formatting.
 
+## Evidence Ledger Boundary
+
+P5 persistence is server-only. `SUPABASE_SERVICE_ROLE_KEY` is read only by `apps/api/src/supabase.ts` and is never part of the Action inputs, Action bundle, browser code, ledger payload, or API response. The backend accepts only an `Authorization: Bearer` machine-to-machine ingest token from `LIMEN_INGEST_TOKEN`; the consuming Action owns the separate `LIMEN_LEDGER_TOKEN` value. Both authenticated writes and reads are handled by the backend, while RLS is enabled and no anonymous policies are created.
+
+The ingest validator rejects prohibited fields recursively, including private keys, seeds, mnemonics, payment signatures/proofs, authorization headers, GitHub tokens, generic tokens and service-role key variants. It also redacts sensitive assignment/header strings before normalized JSON is passed to the database function. The schema contains no credential or raw reusable payment-proof columns.
+
+The Postgres `persist_limen_run` function is `security definer` with a fixed `search_path`, performs the parent and child inserts in one transaction, and exposes execution only to `service_role`. Unique GitHub run/attempt, decision, and run/CVE request keys prevent duplicate evidence on retries. Conflicting idempotency payloads are rejected rather than overwritten.
+
+Ledger outage is not release evidence. The Action calculates the canonical result before attempting persistence and emits a safe warning when the ledger is absent or unavailable. The original `PASS`, `HOLD`, or `REVIEW` and its workflow exit behavior remain unchanged.
+
 ## Future Controls
 
-P1 and P3 ensure that repository policy, identity conflicts, severity conflicts, missing evidence, bounded lookup budgets, and external failures resolve deterministically to `PASS`, `HOLD`, or `REVIEW`. Later ledger and GitHub App milestones must add webhook/request authenticity, idempotency, durable redacted evidence, and explicit separation of test traffic from real user usage.
+P1, P3, and P5 ensure that repository policy, identity conflicts, severity conflicts, missing evidence, bounded lookup budgets, external failures, and persistence failure remain explicit and deterministic. Later GitHub App and public receipt milestones may add stronger request authenticity, tenant isolation, retention controls, and access policy without weakening the current server-only boundary.

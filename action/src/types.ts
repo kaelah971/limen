@@ -6,6 +6,10 @@ import type {
   LimenPolicy,
 } from "../../packages/core/src";
 import type { TelegraphClient } from "../../packages/telegraph/src";
+import type {
+  LedgerUsageClass,
+  SafeTelegraphRequestRecord,
+} from "../../packages/ledger/src/types";
 
 export interface ActionPullRequestContext {
   owner: string;
@@ -17,6 +21,8 @@ export interface ActionPullRequestContext {
   actor: string;
   eventName: "pull_request" | "pull_request_target";
   authorAssociation: string;
+  githubRunId?: number;
+  githubRunAttempt?: number;
 }
 
 export interface ActionInputs {
@@ -25,6 +31,9 @@ export interface ActionInputs {
   telegraphEngineUrl?: string;
   expectedNetwork?: string;
   maxLookups: number;
+  ledgerUrl?: string;
+  ledgerToken?: string;
+  usageClass: LedgerUsageClass;
 }
 
 export interface LimenRunResult {
@@ -36,6 +45,7 @@ export interface LimenRunResult {
   skippedCves: string[];
   telegraphRequestCount: number;
   telegraphCostUsd: number;
+  telegraphRequests: SafeTelegraphRequestRecord[];
   baseSha: string;
   headSha: string;
   pullRequestNumber: number;
@@ -46,6 +56,11 @@ export interface LimenRunResult {
   runReasons: string[];
   runSummary: string;
   context: ActionPullRequestContext;
+  startedAt: string;
+  completedAt: string;
+  ledgerRunId?: string;
+  ledgerPersisted?: boolean;
+  ledgerStatus?: "not-configured" | "recorded" | "failed";
 }
 
 export interface OrchestrationDependencies {

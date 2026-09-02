@@ -18,6 +18,16 @@ inputs:
   expected-network:
     description: Optional x402 network. Falls back to TELEGRAPH_EXPECTED_NETWORK or Base Sepolia.
     required: false
+  ledger-url:
+    description: Optional Limen Evidence Ledger ingestion URL. Falls back to LIMEN_LEDGER_URL.
+    required: false
+  ledger-token:
+    description: Optional machine-to-machine ledger ingest token. Falls back to LIMEN_LEDGER_TOKEN.
+    required: false
+  usage-class:
+    description: "Ledger usage classification: production, demo, development, or test."
+    required: false
+    default: production
 outputs:
   decision:
     description: "Overall Limen decision: PASS, HOLD, or REVIEW."
@@ -43,6 +53,10 @@ outputs:
     description: Sum of reported Telegraph lookup costs in USD.
   reason:
     description: Run-level reason code.
+  ledger-run-id:
+    description: Stable Limen Evidence Ledger run ID when persistence succeeds.
+  ledger-persisted:
+    description: Whether the complete evidence package was recorded in the ledger.
 runs:
   using: node24
   main: action/dist/index.js

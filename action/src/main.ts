@@ -13,6 +13,7 @@ import {
 import { parsePullRequestContext } from "./context";
 import { readActionInputs } from "./inputs";
 import { loadBaseCommitPolicy } from "./policy";
+import { persistActionLedger } from "./persist";
 import { orchestrateLimenRun } from "./orchestrate";
 import { setActionOutputs } from "./outputs";
 import { renderSummary } from "./summary";
@@ -87,6 +88,8 @@ export async function runAction(): Promise<void> {
       owner: githubContext.repo.owner,
       repo: githubContext.repo.repo,
       actor: githubContext.actor,
+      githubRunId: githubContext.runId,
+      githubRunAttempt: githubContext.runAttempt,
     });
     const githubClient = createGitHubClient(
       loadGitHubConfig({
@@ -105,9 +108,11 @@ export async function runAction(): Promise<void> {
       },
     });
 
-    setActionOutputs(result);
-    await actionsCore.summary.addRaw(renderSummary(result)).write();
-    applyActionOutcome(result);
+    const outputResult = await persistActionLedger(result, inputs, actionsCore);
+
+    setActionOutputs(outputResult);
+    await actionsCore.summary.addRaw(renderSummary(outputResult)).write();
+    applyActionOutcome(outputResult);
   } catch (error) {
     const message = formatActionError(error);
     if (isLimenError(error)) {

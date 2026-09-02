@@ -25,6 +25,8 @@ export function setActionOutputs(
     "telegraph-request-count": String(result.telegraphRequestCount),
     "telegraph-cost-usd": result.telegraphCostUsd.toFixed(6),
     reason: result.runReasonCode,
+    "ledger-run-id": result.ledgerRunId ?? "",
+    "ledger-persisted": result.ledgerPersisted === true ? "true" : "false",
   };
 
   for (const [name, value] of Object.entries(outputs)) {

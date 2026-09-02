@@ -1,6 +1,6 @@
 # Limen Architecture
 
-Limen is a release evidence gate, not a vulnerability oracle. P0 establishes the external evidence boundaries; P1 applies a bounded deterministic policy to normalized evidence; P2 loads that policy from the repository; P4 adds a read-only GitHub evidence adapter; P3 orchestrates those pieces inside a bundled GitHub Action.
+Limen is a release evidence gate, not a vulnerability oracle. P0 establishes the external evidence boundaries; P1 applies a bounded deterministic policy to normalized evidence; P2 loads that policy from the repository; P4 adds a read-only GitHub evidence adapter; P3 orchestrates those pieces inside a bundled GitHub Action; P5 persists a sanitized evidence package through a server-only ledger API.
 
 ```text
     limen.yml
@@ -28,7 +28,10 @@ TelegraphEvidenceInput
   LimenDecisionResult
             |
             v
-     PASS / HOLD / REVIEW
+      PASS / HOLD / REVIEW
+             |
+             v
+   optional evidence ledger
 ```
 
 ## Source Boundaries
@@ -104,9 +107,9 @@ validated base SHA / head SHA
                                       |
                                       v
                          aggregate HOLD > REVIEW > PASS
-                                      |
-                                      v
-                  summary, annotations, outputs, step result
+             |
+             v
+                   optional ledger ingest, summary, annotations, outputs, step result
 ```
 
 The Action does not create a competing per-CVE decision format. `LimenRunResult` is only a run envelope containing canonical `LimenDecisionResult[]`, context, policy version, lookup accounting, and aggregation state. Telegraph is initialized lazily only when an active CVE requires a paid lookup.
@@ -175,6 +178,16 @@ CVE identity is visible and conservative. Malformed or conflicting identities no
 - Repository policy makes the final decision.
 - Missing, malformed, or conflicting evidence can become `REVIEW`.
 
-## P0/P1/P2/P4/P3 Boundary
+## P5 Evidence Ledger
 
-P0/P1/P2/P4/P3 contain the external evidence contracts, Telegraph adapter, policy loader, read-only GitHub adapter, and bundled read-oriented GitHub Action. They intentionally contain no ledger, release authentication, durable receipts, web UI, dashboard, GitHub App installation, billing, or design-system implementation. Those remain later milestones in the approved build plan.
+P5 adds a server-only persistence boundary without changing the decision engine or Telegraph client. The Action builds one strict `LedgerRunIngest` package from `LimenRunResult`, canonical `LimenDecisionResult[]`, and one safe Telegraph request record per actual lookup attempt. It sends the package only when both optional ledger URL and token are configured.
+
+`apps/api` validates the machine-to-machine token, rejects prohibited credential fields, applies safe redaction, and passes the validated package to `SupabaseEvidenceLedger`. The repository invokes one `persist_limen_run(jsonb)` Postgres function so `runs`, `decisions`, and `telegraph_requests` are committed atomically. GitHub run ID plus attempt, decision ID, and run/CVE request keys provide V1 idempotency.
+
+The service role is loaded only by `apps/api/src/supabase.ts`. It is not imported by Action code or browser code. The API's authenticated `GET /v1/ledger/runs/:id` is backend-only and is not a receipt route. P5 stores normalized Telegraph fields while clearing the canonical diagnostic `raw` payload, and leaves `settlement_reference` null when the existing Telegraph contract does not safely expose a transaction reference.
+
+If ledger configuration is absent or persistence fails, the Action preserves the already-calculated `PASS`, `HOLD`, or `REVIEW`, emits a safe ledger status in the summary, and does not rewrite the release decision. Historical R0 data has an explicit, manual-only sanitized backfill path and is classified as `demo`.
+
+## P0/P1/P2/P4/P3/P5 Boundary
+
+P0/P1/P2/P4/P3/P5 contain the external evidence contracts, Telegraph adapter, policy loader, read-only GitHub adapter, bundled GitHub Action, and server-owned sanitized evidence ledger. They intentionally contain no durable public receipts, web UI, dashboard, GitHub App installation, billing, or design-system implementation. Those remain later milestones in the approved build plan.

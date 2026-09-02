@@ -188,6 +188,7 @@ function makeRun(overallDecision: LimenRunResult["overallDecision"]): LimenRunRe
     skippedCves: [],
     telegraphRequestCount: 0,
     telegraphCostUsd: 0,
+    telegraphRequests: [],
     baseSha: BASE_SHA,
     headSha: HEAD_SHA,
     pullRequestNumber: 42,
@@ -198,6 +199,8 @@ function makeRun(overallDecision: LimenRunResult["overallDecision"]): LimenRunRe
     runReasons: [],
     runSummary: "A test run summary.",
     context: actionContext,
+    startedAt: "2026-09-02T10:00:00.000Z",
+    completedAt: "2026-09-02T10:00:00.000Z",
   };
 }
 
@@ -777,6 +780,9 @@ describe("P3 aggregation, UX, and build boundaries", () => {
       "max-lookups",
       "telegraph-engine-url",
       "expected-network",
+      "ledger-url",
+      "ledger-token",
+      "usage-class",
     ]);
     expect(Object.keys(metadata.outputs)).toEqual([
       "decision",
@@ -791,6 +797,8 @@ describe("P3 aggregation, UX, and build boundaries", () => {
       "telegraph-request-count",
       "telegraph-cost-usd",
       "reason",
+      "ledger-run-id",
+      "ledger-persisted",
     ]);
   });
 

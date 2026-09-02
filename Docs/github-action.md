@@ -2,7 +2,7 @@
 
 Limen is a release-evidence gate for dependency-sensitive pull requests. The Action reads GitHub API data, retrieves the policy from the pull request base commit, requests routed Telegraph evidence only when a relevant CVE exists, evaluates the existing P1 decision engine, and fails or passes the workflow according to the result.
 
-It does not checkout the pull request, install dependencies, run repository scripts, persist evidence, create custom Check Runs, or execute target-repository code.
+It does not checkout the pull request, install dependencies, run repository scripts, create custom Check Runs, or execute target-repository code. Optional evidence persistence is performed by a separate server-side ledger API; the Action never receives a Supabase service-role key.
 
 ## Installation
 
@@ -52,12 +52,15 @@ There is deliberately no checkout step. `telegraph-engine-url` may instead be pr
 | `max-lookups` | No | Unique paid CVE lookups, bounded from `1` to `20`; default `5`. |
 | `telegraph-engine-url` | No | Telegraph Engine `/v1/ask` URL; falls back to `TELEGRAPH_ENGINE_URL`. |
 | `expected-network` | No | x402 network; falls back to `TELEGRAPH_EXPECTED_NETWORK` or Base Sepolia. |
+| `ledger-url` | No | Optional Limen Evidence Ledger `/v1/ledger/runs` URL; falls back to `LIMEN_LEDGER_URL`. |
+| `ledger-token` | No | Optional machine-to-machine ledger token; falls back to `LIMEN_LEDGER_TOKEN`. |
+| `usage-class` | No | `production`, `demo`, `development`, or `test`; defaults to `production`. |
 
 The Action immediately masks the GitHub token and Telegraph private key when read. Neither is included in outputs, summaries, annotations, or error details.
 
 ## Outputs
 
-The Action exposes `decision`, `run-id`, `policy-version`, `decision-count`, `pass-count`, `hold-count`, `review-count`, `evaluated-cves`, `skipped-cves`, `telegraph-request-count`, `telegraph-cost-usd`, and `reason`. CVE list outputs are JSON arrays. Outputs contain no raw GitHub response, payment proof, signature, token, or private key.
+The Action exposes `decision`, `run-id`, `policy-version`, `decision-count`, `pass-count`, `hold-count`, `review-count`, `evaluated-cves`, `skipped-cves`, `telegraph-request-count`, `telegraph-cost-usd`, `reason`, `ledger-run-id`, and `ledger-persisted`. CVE list outputs are JSON arrays. Outputs contain no raw GitHub response, payment proof, signature, token, or private key.
 
 ## Policy Trust
 
@@ -90,6 +93,7 @@ No relevant introduced vulnerability produces `PASS`, zero paid requests, and th
 8. Call the existing Telegraph `lookupCve()` production client. It performs the real Engine, HTTP 402, x402 payment, `PAYMENT-SIGNATURE` retry, and `CVE_LOOKUP` verification flow.
 9. Evaluate every selected repository evidence pair with the existing pure P1 evaluator.
 10. Aggregate canonical decisions with `HOLD > REVIEW > PASS`.
+11. If both optional ledger settings are present, send one sanitized `LedgerRunIngest` package to the server-side ledger API after evaluation.
 
 Duplicate CVEs share one paid Telegraph request while each repository evidence record still receives its own canonical P1 decision. Budget overflow can never produce `PASS`. A Telegraph failure becomes a failed P1 evidence input and therefore `REVIEW`.
 
@@ -102,6 +106,8 @@ The Action writes a `GITHUB_STEP_SUMMARY` containing repository, PR, policy vers
 - `REVIEW` uses a warning annotation followed by a failed workflow step.
 
 `HOLD` means “evidence is sufficient; policy says stop.” `REVIEW` means “evidence is insufficient or unavailable; human investigation is required.” Both are intentionally non-green workflow outcomes.
+
+When persistence is enabled, the summary reports `Evidence ledger: recorded` and a stable `LM-RUN-...` ID. Without configuration it reports `Evidence ledger: not configured`; an unavailable API reports `Evidence ledger: persistence failed`. Ledger persistence is non-fatal and never changes the release decision or Action exit behavior.
 
 ## Forks And Dependabot
 
@@ -154,4 +160,4 @@ The Action is bundled with:
 npm run build:action
 ```
 
-This generates `action/dist/index.js`, the entrypoint declared in `action.yml`. Consumers do not run `npm install` or build the Action inside their repositories. P3 does not include persistence, receipts, the web app, authentication, billing, GitHub App installation, custom Checks API calls, or Judge Mode.
+This generates `action/dist/index.js`, the entrypoint declared in `action.yml`. Consumers do not run `npm install` or build the Action inside their repositories. P3 does not include public receipts, the web app, user authentication, billing, GitHub App installation, custom Checks API calls, or Judge Mode. P5's optional persistence remains a separate backend service.

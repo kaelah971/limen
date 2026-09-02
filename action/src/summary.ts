@@ -93,6 +93,14 @@ Cost: \`$${result.telegraphCostUsd.toFixed(6)}\`
 
 ${telegraph}
 
+## Evidence ledger
+
+${result.ledgerStatus === "recorded"
+  ? `Evidence ledger: recorded\nRun ID: \`${safe(result.ledgerRunId)}\``
+  : result.ledgerStatus === "failed"
+    ? "Evidence ledger: persistence failed"
+    : "Evidence ledger: not configured"}
+
 ## State
 
 - **HOLD:** evidence is sufficient; policy says stop.
