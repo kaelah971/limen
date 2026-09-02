@@ -142,6 +142,29 @@ describe("GitHubClientImpl", () => {
     expect(calls.every((call) => call.init?.method === "GET")).toBe(true);
   });
 
+  it("retrieves a policy file at an explicit ref through the Contents API", async () => {
+    const { client, calls } = createClient([
+      jsonResponse({
+        type: "file",
+        encoding: "base64",
+        content: "cHJvZHVjdGlvbjoK",
+        path: "configs/limen.yml",
+      }),
+    ]);
+
+    const result = await client.getRepositoryFile({
+      owner: "owner",
+      repo: "repo",
+      path: "configs/limen.yml",
+      ref: "a".repeat(40),
+    });
+
+    expect(String(calls[0]?.input)).toBe(
+      `https://api.github.com/repos/owner/repo/contents/configs/limen.yml?ref=${"a".repeat(40)}`,
+    );
+    expect(result.data.encoding).toBe("base64");
+  });
+
   it("accepts full SHAs, explicit refs, and rejects ambiguous abbreviated SHAs", async () => {
     const fullBase = "A".repeat(40);
     const fullHead = "B".repeat(40);

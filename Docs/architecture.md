@@ -1,6 +1,6 @@
-# Limen P0/P1/P2/P4 Architecture
+# Limen Architecture
 
-Limen is a release evidence gate, not a vulnerability oracle. P0 establishes the external evidence boundaries; P1 applies a bounded deterministic policy to normalized evidence; P2 loads that policy from the repository; P4 adds a read-only GitHub evidence adapter.
+Limen is a release evidence gate, not a vulnerability oracle. P0 establishes the external evidence boundaries; P1 applies a bounded deterministic policy to normalized evidence; P2 loads that policy from the repository; P4 adds a read-only GitHub evidence adapter; P3 orchestrates those pieces inside a bundled GitHub Action.
 
 ```text
     limen.yml
@@ -79,6 +79,40 @@ P1 decision engine
 
 The client uses `application/vnd.github+json`, API version `2026-03-10`, optional Bearer authentication, bounded timeouts, and typed errors for authentication, permission, rate-limit, response-shape, advisory-not-found, snapshot-warning, and evidence-conflict cases. It performs only `GET` requests.
 
+## GitHub Action Flow
+
+`action/src` is a thin orchestration boundary around the existing packages:
+
+```text
+pull_request event metadata
+        |
+        v
+validated base SHA / head SHA
+        |
+        +--> Contents API at base SHA -> P2 LimenPolicy
+        |
+        +--> Dependency Review base...head -> P4 evidence
+                                      |
+                                      v
+                             unique active CVEs
+                                      |
+                                      v
+                         paid routed Telegraph lookup
+                                      |
+                                      v
+                         existing P1 decision engine
+                                      |
+                                      v
+                         aggregate HOLD > REVIEW > PASS
+                                      |
+                                      v
+                  summary, annotations, outputs, step result
+```
+
+The Action does not create a competing per-CVE decision format. `LimenRunResult` is only a run envelope containing canonical `LimenDecisionResult[]`, context, policy version, lookup accounting, and aggregation state. Telegraph is initialized lazily only when an active CVE requires a paid lookup.
+
+For a PR, policy authority is always the base SHA. A policy file changed by the PR head is ignored for the current decision, preventing a change from weakening its own release gate. The Action supports `pull_request` and `pull_request_target`, but both paths use event metadata and REST APIs only; no target checkout or command execution is required.
+
 ## Telegraph Flow
 
 `packages/telegraph` owns the Engine and x402 boundary. Limen sends an auto-routed request to the configured Telegraph `/v1/ask` endpoint; it does not select a Miner or send a top-level Intent.
@@ -141,6 +175,6 @@ CVE identity is visible and conservative. Malformed or conflicting identities no
 - Repository policy makes the final decision.
 - Missing, malformed, or conflicting evidence can become `REVIEW`.
 
-## P0/P1/P2/P4 Boundary
+## P0/P1/P2/P4/P3 Boundary
 
-P0/P1/P2/P4 contain the external evidence contracts, Telegraph adapter, policy loader, and read-only GitHub adapter. They intentionally contain no GitHub Action, ledger, release authentication, receipts, web UI, dashboard, or design-system implementation. Those remain later milestones in the approved build plan.
+P0/P1/P2/P4/P3 contain the external evidence contracts, Telegraph adapter, policy loader, read-only GitHub adapter, and bundled read-oriented GitHub Action. They intentionally contain no ledger, release authentication, durable receipts, web UI, dashboard, GitHub App installation, billing, or design-system implementation. Those remain later milestones in the approved build plan.

@@ -1,0 +1,51 @@
+name: Limen
+description: Evaluate dependency-sensitive pull requests with repository facts, routed Telegraph evidence, and an explicit policy-backed release decision.
+author: Limen
+inputs:
+  github-token:
+    description: GitHub token used for read-only repository and pull request API access.
+    required: true
+  telegraph-private-key:
+    description: Optional EVM private key for paid Telegraph CVE_LOOKUP requests.
+    required: false
+  max-lookups:
+    description: Maximum number of unique paid CVE lookups for this run.
+    required: false
+    default: "5"
+  telegraph-engine-url:
+    description: Optional Telegraph Engine /v1/ask URL. Falls back to TELEGRAPH_ENGINE_URL.
+    required: false
+  expected-network:
+    description: Optional x402 network. Falls back to TELEGRAPH_EXPECTED_NETWORK or Base Sepolia.
+    required: false
+outputs:
+  decision:
+    description: "Overall Limen decision: PASS, HOLD, or REVIEW."
+  run-id:
+    description: Unique identifier for this in-memory release-check run.
+  policy-version:
+    description: Deterministic version of the policy loaded from the pull request base commit.
+  decision-count:
+    description: Number of canonical per-CVE Limen decisions.
+  pass-count:
+    description: Number of PASS decisions.
+  hold-count:
+    description: Number of HOLD decisions.
+  review-count:
+    description: Number of REVIEW decisions.
+  evaluated-cves:
+    description: JSON array of unique CVE IDs selected for evaluation.
+  skipped-cves:
+    description: JSON array of unique CVE IDs skipped after the lookup budget was reached.
+  telegraph-request-count:
+    description: Number of paid Telegraph lookup attempts made in this run.
+  telegraph-cost-usd:
+    description: Sum of reported Telegraph lookup costs in USD.
+  reason:
+    description: Run-level reason code.
+runs:
+  using: node24
+  main: action/dist/index.js
+branding:
+  color: purple
+  icon: git-merge

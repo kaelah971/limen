@@ -1,6 +1,6 @@
-# Limen P0/P1/P2/P4 Security Model
+# Limen Security Model
 
-P0 protects the external payment/evidence boundary. P1 keeps the decision evaluator pure. P2 treats repository policy as untrusted configuration. P4 adds read-only GitHub ingestion without persistence or release authentication.
+P0 protects the external payment/evidence boundary. P1 keeps the decision evaluator pure. P2 treats repository policy as untrusted configuration. P4 adds read-only GitHub ingestion. P3 orchestrates those boundaries in a bundled Action without persistence or release authentication.
 
 ## Secrets
 
@@ -24,10 +24,18 @@ GitHub responses are also untrusted. Zod schemas validate Dependency Review, Glo
 
 GitHub requests are restricted to `GET` operations. Repository owner, name, GHSA identifiers, and revision values are validated or encoded before URL construction. Timeouts use an abort signal, and rate-limit remaining/reset values plus GitHub request IDs are retained as non-secret metadata.
 
+## Action Threat Boundary
+
+The P3 Action never checks out, installs, builds, or executes the target pull request. It uses event metadata and GitHub REST APIs, which prevents PR-controlled code or package scripts from running in a job that may hold `TELEGRAPH_PRIVATE_KEY`. Policy is retrieved from the trusted base SHA, not the proposed head SHA.
+
+The Action requires only `contents: read` in its reference workflow and does not call the Checks API. `HOLD` and `REVIEW` fail the workflow step so branch protection can enforce the result without granting write permissions. Paid Telegraph configuration is lazy: no relevant CVE means no wallet initialization and no payment credential requirement.
+
+`pull_request_target` is privileged. A consuming workflow must never combine it with an untrusted PR-head checkout or execution. Maintainers using it for trusted automated PRs should restrict actors or require a protected environment/manual approval. The Action masks credentials immediately, emits only safe outputs and summaries, and maps expected Telegraph failures to P1 `REVIEW`.
+
 ## Policy Configuration
 
 `limen.yml` is parsed with a mature YAML library using core schema semantics and duplicate-key rejection. P2 permits only the bounded snake_case policy shape, rejects unknown keys and unsupported values, does not execute tags or expand environment values, and requires explicit risk appetite fields. Uncertainty settings safely default to `review`. Policy versions hash canonical effective content rather than source formatting.
 
 ## Future Controls
 
-P1 ensures that repository policy, identity conflicts, severity conflicts, and missing evidence resolve deterministically to `PASS`, `HOLD`, or `REVIEW`. Later GitHub Action and ledger milestones must add least-privilege installation permissions, webhook/request authenticity, idempotency, durable redacted evidence, and explicit separation of test traffic from real user usage.
+P1 and P3 ensure that repository policy, identity conflicts, severity conflicts, missing evidence, bounded lookup budgets, and external failures resolve deterministically to `PASS`, `HOLD`, or `REVIEW`. Later ledger and GitHub App milestones must add webhook/request authenticity, idempotency, durable redacted evidence, and explicit separation of test traffic from real user usage.

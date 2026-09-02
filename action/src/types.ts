@@ -1,0 +1,64 @@
+import type {
+  GitHubClient,
+} from "../../packages/github/src";
+import type {
+  LimenDecisionResult,
+  LimenPolicy,
+} from "../../packages/core/src";
+import type { TelegraphClient } from "../../packages/telegraph/src";
+
+export interface ActionPullRequestContext {
+  owner: string;
+  repo: string;
+  repository: string;
+  pullRequestNumber: number;
+  baseSha: string;
+  headSha: string;
+  actor: string;
+  eventName: "pull_request" | "pull_request_target";
+  authorAssociation: string;
+}
+
+export interface ActionInputs {
+  githubToken: string;
+  telegraphPrivateKey?: string;
+  telegraphEngineUrl?: string;
+  expectedNetwork?: string;
+  maxLookups: number;
+}
+
+export interface LimenRunResult {
+  runId: string;
+  overallDecision: "PASS" | "HOLD" | "REVIEW";
+  decisions: LimenDecisionResult[];
+  policyVersion: string;
+  evaluatedCves: string[];
+  skippedCves: string[];
+  telegraphRequestCount: number;
+  telegraphCostUsd: number;
+  baseSha: string;
+  headSha: string;
+  pullRequestNumber: number;
+  evaluatedAt: string;
+  budgetExceeded: boolean;
+  missingCveCount: number;
+  runReasonCode: string;
+  runReasons: string[];
+  runSummary: string;
+  context: ActionPullRequestContext;
+}
+
+export interface OrchestrationDependencies {
+  githubClient: GitHubClient;
+  telegraphClientFactory?: () => TelegraphClient;
+  sleep?: (milliseconds: number) => Promise<void>;
+  now?: () => Date;
+  createRunId?: () => string;
+}
+
+export interface OrchestrateLimenRunInput {
+  context: ActionPullRequestContext;
+  policy: LimenPolicy;
+  maxLookups: number;
+  dependencies: OrchestrationDependencies;
+}

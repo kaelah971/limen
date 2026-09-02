@@ -51,10 +51,12 @@ export {
   DependabotAlertSchema,
   DependabotAlertsResponseSchema,
   GlobalAdvisorySchema,
+  RepositoryFileSchema,
 } from "./schemas";
 
 export type {
   CompareDependenciesInput,
+  GetRepositoryFileInput,
   GetGlobalAdvisoryInput,
   GitHubAdvisoryVulnerability,
   GitHubAdvisoryVulnerabilityDto,
@@ -78,6 +80,7 @@ export type {
   GitHubGlobalAdvisoryDto,
   GitHubRateLimitMetadata,
   GitHubResponseMetadata,
+  GitHubRepositoryFileDto,
   ListDependabotAlertsInput,
   NormalizeDependencyReviewInput,
 } from "./types";

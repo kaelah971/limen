@@ -52,6 +52,13 @@ export interface ListDependabotAlertsInput {
   repo: string;
 }
 
+export interface GetRepositoryFileInput {
+  owner: string;
+  repo: string;
+  path: string;
+  ref: string;
+}
+
 export interface GitHubDependencyReviewVulnerabilityDto {
   severity: string;
   advisory_ghsa_id: string | null;
@@ -81,6 +88,13 @@ export interface GitHubDependencySnapshotWarning {
 export interface GitHubDependencyReviewResponseDto {
   changes: GitHubDependencyReviewChangeDto[];
   warnings: GitHubDependencySnapshotWarning[];
+}
+
+export interface GitHubRepositoryFileDto {
+  type: "file";
+  encoding: "base64";
+  content: string;
+  path: string;
 }
 
 export interface GitHubDependencyVulnerability {
@@ -224,4 +238,7 @@ export interface GitHubClient {
   listDependabotAlerts(
     input: ListDependabotAlertsInput,
   ): Promise<GitHubApiResult<GitHubDependabotAlertDto[]>>;
+  getRepositoryFile(
+    input: GetRepositoryFileInput,
+  ): Promise<GitHubApiResult<GitHubRepositoryFileDto>>;
 }

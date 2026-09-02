@@ -111,3 +111,12 @@ export const DependabotAlertSchema = z
   .passthrough();
 
 export const DependabotAlertsResponseSchema = z.array(DependabotAlertSchema);
+
+export const RepositoryFileSchema = z
+  .object({
+    type: z.literal("file"),
+    encoding: z.literal("base64"),
+    content: z.string(),
+    path: z.string().min(1),
+  })
+  .passthrough();

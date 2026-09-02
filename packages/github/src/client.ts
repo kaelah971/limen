@@ -13,6 +13,7 @@ import {
   DependencyReviewResponseSchema,
   DependabotAlertsResponseSchema,
   GlobalAdvisorySchema,
+  RepositoryFileSchema,
 } from "./schemas";
 import type {
   CompareDependenciesInput,
@@ -25,6 +26,8 @@ import type {
   GitHubResponseMetadata,
   ListDependabotAlertsInput,
   GitHubDependabotAlertDto,
+  GetRepositoryFileInput,
+  GitHubRepositoryFileDto,
 } from "./types";
 
 const FULL_SHA_PATTERN = /^[0-9a-f]{40}$/i;
@@ -43,6 +46,11 @@ function requiredValue(value: string, field: string): string {
     });
   }
   return normalized;
+}
+
+function encodeRepositoryPath(value: string): string {
+  const path = requiredValue(value, "path");
+  return path.split("/").map((segment) => encodeURIComponent(segment)).join("/");
 }
 
 function normalizeRevision(
@@ -297,6 +305,20 @@ export class GitHubClientImpl implements GitHubClient {
       `/repos/${owner}/${repo}/dependabot/alerts?per_page=100`,
       DependabotAlertsResponseSchema,
       "dependabot_alerts",
+    );
+  }
+
+  async getRepositoryFile(
+    input: GetRepositoryFileInput,
+  ): Promise<GitHubApiResult<GitHubRepositoryFileDto>> {
+    const owner = encodeURIComponent(requiredValue(input.owner, "owner"));
+    const repo = encodeURIComponent(requiredValue(input.repo, "repo"));
+    const path = encodeRepositoryPath(input.path);
+    const ref = encodeURIComponent(requiredValue(input.ref, "ref"));
+    return this.request(
+      `/repos/${owner}/${repo}/contents/${path}?ref=${ref}`,
+      RepositoryFileSchema,
+      "repository_file",
     );
   }
 }
