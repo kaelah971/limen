@@ -1,6 +1,6 @@
-# Limen P0/P1/P2 Architecture
+# Limen P0/P1/P2/P4 Architecture
 
-Limen is a release evidence gate, not a vulnerability oracle. P0 establishes the external evidence boundaries; P1 applies a bounded deterministic policy to normalized evidence; P2 loads that policy from the repository.
+Limen is a release evidence gate, not a vulnerability oracle. P0 establishes the external evidence boundaries; P1 applies a bounded deterministic policy to normalized evidence; P2 loads that policy from the repository; P4 adds a read-only GitHub evidence adapter.
 
 ```text
     limen.yml
@@ -33,7 +33,7 @@ TelegraphEvidenceInput
 
 ## Source Boundaries
 
-GitHub and Dependabot own repository-specific facts: package identity, installed version, vulnerable range, first patched version, manifest path, dependency scope, relationship, repository advisory context, and the normalized `exposureState` (`affected`, `patched`, `not_affected`, or `unknown`). P1 consumes that conclusion and does not calculate semantic versions.
+GitHub and Dependabot own repository-specific facts: package identity, installed version, vulnerable range, first patched version, manifest path, dependency scope, relationship, repository advisory context, and the normalized `exposureState` (`affected`, `patched`, `not_affected`, or `unknown`). The P4 adapter normalizes these facts into `RepositoryExposureEvidence`; P1 consumes that conclusion and does not calculate semantic versions.
 
 Telegraph owns routed second-source CVE evidence: CVE facts, severity, CVSS, description, references, Intent, Miner provenance, request cost, duration, payment/routing metadata, and incomplete signals. The decision boundary receives this as an explicit `TelegraphEvidenceInput` union: `{ status: "available", evidence }` or `{ status: "failed", code }`. Telegraph does not determine whether this repository is exploitable.
 
@@ -63,6 +63,21 @@ P1 decision engine
 ```
 
 `packages/core/src/policy` owns this Node-side filesystem and YAML boundary. It supports root `limen.yml` and falls back to root `limen.yaml` only when `limen.yml` is absent. An explicit loader path takes precedence over filename discovery. The policy parser has no network, shell, environment expansion, remote includes, executable hooks, or GitHub integration.
+
+## GitHub Flow
+
+`packages/github` is a read-only REST adapter. It owns GitHub transport, runtime response validation, rate-limit metadata, advisory enrichment, and conversion into the existing repository evidence contract. It does not call Telegraph, load policy, or evaluate a release decision.
+
+1. Call Dependency Review compare with repository owner/name and explicit base/head revisions.
+2. Reject abbreviated commit SHAs when a revision is not explicitly marked as a ref.
+3. Reject dependency snapshot warnings because a warning makes the diff non-authoritative.
+4. Normalize added or changed vulnerable dependencies as `affected` candidates.
+5. Optionally enrich a Dependency Review GHSA with the Global Advisory endpoint.
+6. Match advisory vulnerability metadata by normalized ecosystem and exact package identity; ambiguous matches preserve range and patch as `null`.
+7. Normalize Dependabot alerts separately as default-branch repository evidence; an open alert is `affected`, while dismissed, auto-dismissed, or fixed alerts are inactive candidates.
+8. Emit final `RepositoryExposureEvidence` only for active candidates with a valid CVE. GHSA-only or inactive candidates remain explicit normalization results and cannot be mistaken for final evidence.
+
+The client uses `application/vnd.github+json`, API version `2026-03-10`, optional Bearer authentication, bounded timeouts, and typed errors for authentication, permission, rate-limit, response-shape, advisory-not-found, snapshot-warning, and evidence-conflict cases. It performs only `GET` requests.
 
 ## Telegraph Flow
 
@@ -126,6 +141,6 @@ CVE identity is visible and conservative. Malformed or conflicting identities no
 - Repository policy makes the final decision.
 - Missing, malformed, or conflicting evidence can become `REVIEW`.
 
-## P0/P1/P2 Boundary
+## P0/P1/P2/P4 Boundary
 
-P0/P1/P2 intentionally contain no production GitHub adapter, Dependabot logic, GitHub Action, ledger, authentication, receipts, web UI, dashboard, or design-system implementation. Those are later milestones in the approved build plan.
+P0/P1/P2/P4 contain the external evidence contracts, Telegraph adapter, policy loader, and read-only GitHub adapter. They intentionally contain no GitHub Action, ledger, release authentication, receipts, web UI, dashboard, or design-system implementation. Those remain later milestones in the approved build plan.

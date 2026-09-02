@@ -1,0 +1,15 @@
+[
+  {
+    "change_type": "changed",
+    "manifest": "package.json",
+    "ecosystem": "npm",
+    "name": "react",
+    "version": "19.2.8",
+    "package_url": "pkg:npm/react@19.2.8",
+    "license": "MIT",
+    "source_repository_url": "https://github.com/facebook/react",
+    "scope": "runtime",
+    "relationship": "direct",
+    "vulnerabilities": []
+  }
+]

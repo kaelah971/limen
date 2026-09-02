@@ -1,0 +1,21 @@
+{
+  "ghsa_id": "GHSA-35jh-r3h4-6jhm",
+  "cve_id": null,
+  "summary": "An advisory without a CVE",
+  "description": "The provider has not assigned a CVE.",
+  "severity": "high",
+  "identifiers": [
+    { "type": "GHSA", "value": "GHSA-35jh-r3h4-6jhm" }
+  ],
+  "references": [],
+  "vulnerabilities": [
+    {
+      "package": { "ecosystem": "npm", "name": "lodash" },
+      "severity": "high",
+      "vulnerable_version_range": "<4.17.21",
+      "first_patched_version": { "identifier": "4.17.21" }
+    }
+  ],
+  "cvss": { "score": 7.2 },
+  "cvss_severities": null
+}

@@ -1,0 +1,38 @@
+{
+  "number": 8,
+  "state": "open",
+  "dependency": {
+    "package": { "ecosystem": "npm", "name": "eslint" },
+    "manifest_path": "package.json",
+    "scope": "development",
+    "relationship": "transitive"
+  },
+  "security_advisory": {
+    "ghsa_id": "GHSA-9x7f-g7q4-2h5p",
+    "cve_id": "CVE-2024-0001",
+    "summary": "A development dependency advisory",
+    "description": "A sanitized development dependency advisory fixture.",
+    "severity": "medium",
+    "identifiers": [
+      { "type": "GHSA", "value": "GHSA-9x7f-g7q4-2h5p" },
+      { "type": "CVE", "value": "CVE-2024-0001" }
+    ],
+    "references": [],
+    "vulnerabilities": [
+      {
+        "package": { "ecosystem": "npm", "name": "eslint" },
+        "severity": "medium",
+        "vulnerable_version_range": ">=8.0.0 <8.5.0",
+        "first_patched_version": { "identifier": "8.5.0" }
+      }
+    ],
+    "cvss": { "score": 5.0 },
+    "cvss_severities": null
+  },
+  "security_vulnerability": {
+    "package": { "ecosystem": "npm", "name": "eslint" },
+    "severity": "medium",
+    "vulnerable_version_range": ">=8.0.0 <8.5.0",
+    "first_patched_version": { "identifier": "8.5.0" }
+  }
+}

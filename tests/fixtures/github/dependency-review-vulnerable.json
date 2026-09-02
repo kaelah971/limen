@@ -1,0 +1,22 @@
+[
+  {
+    "change_type": "added",
+    "manifest": "package-lock.json",
+    "ecosystem": "npm",
+    "name": "lodash",
+    "version": "4.17.20",
+    "package_url": "pkg:npm/lodash@4.17.20",
+    "license": "MIT",
+    "source_repository_url": "https://github.com/lodash/lodash",
+    "scope": "runtime",
+    "relationship": "direct",
+    "vulnerabilities": [
+      {
+        "severity": "high",
+        "advisory_ghsa_id": "GHSA-35jh-r3h4-6jhm",
+        "advisory_summary": "Prototype pollution in lodash",
+        "advisory_url": "https://github.com/advisories/GHSA-35jh-r3h4-6jhm"
+      }
+    ]
+  }
+]
