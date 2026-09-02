@@ -25,6 +25,19 @@ export interface ActionOutcomeRuntime {
   setFailed(message: string): void;
 }
 
+export function formatActionError(error: unknown): string {
+  const serialized = serializeError(error);
+  let details = "";
+  if (serialized.details !== undefined) {
+    try {
+      details = ` Details: ${JSON.stringify(serialized.details)}`;
+    } catch {
+      details = "";
+    }
+  }
+  return `Limen failed: ${serialized.code}. ${serialized.message}${details}`;
+}
+
 export function applyActionOutcome(
   result: LimenRunResult,
   runtime: ActionOutcomeRuntime = actionsCore,
@@ -42,8 +55,9 @@ export function applyActionOutcome(
   runtime.setFailed(`Limen: REVIEW. ${result.runSummary}`);
 }
 
-function createTelegraphFactory(
+export function createTelegraphFactory(
   inputs: ActionInputs,
+  baseEnvironment: Record<string, string | undefined> = process.env,
 ): (() => TelegraphClient) | undefined {
   if (inputs.telegraphPrivateKey === undefined) {
     return undefined;
@@ -51,7 +65,7 @@ function createTelegraphFactory(
 
   return () => {
     const environment = {
-      ...process.env,
+      ...baseEnvironment,
       TELEGRAPH_PRIVATE_KEY: inputs.telegraphPrivateKey,
       ...(inputs.telegraphEngineUrl === undefined
         ? {}
@@ -95,10 +109,10 @@ export async function runAction(): Promise<void> {
     await actionsCore.summary.addRaw(renderSummary(result)).write();
     applyActionOutcome(result);
   } catch (error) {
-    const serialized = serializeError(error);
+    const message = formatActionError(error);
     if (isLimenError(error)) {
-      actionsCore.error(`Limen failed: ${serialized.code}. ${serialized.message}`);
+      actionsCore.error(message);
     }
-    actionsCore.setFailed(`Limen failed: ${serialized.code}. ${serialized.message}`);
+    actionsCore.setFailed(message);
   }
 }

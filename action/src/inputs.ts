@@ -40,22 +40,25 @@ export function readActionInputs(
   reader.setSecret(githubToken);
 
   const inputPrivateKey = reader.getInput("telegraph-private-key").trim();
-  const telegraphPrivateKey = inputPrivateKey || environment.TELEGRAPH_PRIVATE_KEY?.trim() || undefined;
+  const environmentPrivateKey = environment.TELEGRAPH_PRIVATE_KEY?.trim();
+  const telegraphPrivateKey = inputPrivateKey || environmentPrivateKey || undefined;
   if (telegraphPrivateKey !== undefined) {
     reader.setSecret(telegraphPrivateKey);
   }
 
   const inputEngineUrl = reader.getInput("telegraph-engine-url").trim();
   const inputNetwork = reader.getInput("expected-network").trim();
+  const environmentEngineUrl = environment.TELEGRAPH_ENGINE_URL?.trim();
+  const environmentNetwork = environment.TELEGRAPH_EXPECTED_NETWORK?.trim();
 
   return {
     githubToken,
     ...(telegraphPrivateKey === undefined ? {} : { telegraphPrivateKey }),
-    ...(inputEngineUrl || environment.TELEGRAPH_ENGINE_URL
-      ? { telegraphEngineUrl: inputEngineUrl || environment.TELEGRAPH_ENGINE_URL }
+    ...(inputEngineUrl || environmentEngineUrl
+      ? { telegraphEngineUrl: inputEngineUrl || environmentEngineUrl }
       : {}),
-    ...(inputNetwork || environment.TELEGRAPH_EXPECTED_NETWORK
-      ? { expectedNetwork: inputNetwork || environment.TELEGRAPH_EXPECTED_NETWORK }
+    ...(inputNetwork || environmentNetwork
+      ? { expectedNetwork: inputNetwork || environmentNetwork }
       : {}),
     maxLookups: parseMaxLookups(reader.getInput("max-lookups") || "5"),
   };

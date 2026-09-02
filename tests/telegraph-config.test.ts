@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ConfigurationError,
+  serializeError,
   UnexpectedNetworkError,
 } from "../packages/core/src";
 import {
@@ -17,6 +18,8 @@ const validEnvironment = {
   TELEGRAPH_EXPECTED_NETWORK: "base-sepolia",
   TELEGRAPH_TIMEOUT_MS: "5000",
 };
+const currentEngineUrl = "http://13.237.89.59:7044/engine/v1/ask";
+const syntheticPrivateKey = `0x${"a".repeat(64)}`;
 
 const validRequirement = {
   scheme: "exact",
@@ -40,6 +43,34 @@ describe("loadTelegraphConfig", () => {
     expect(isBaseSepoliaConfig(config)).toBe(true);
   });
 
+  it("accepts the current R0 Engine URL and a 66-character private key", () => {
+    const config = loadTelegraphConfig({
+      TELEGRAPH_ENGINE_URL: currentEngineUrl,
+      TELEGRAPH_PRIVATE_KEY: syntheticPrivateKey,
+    });
+
+    expect(config).toMatchObject({
+      engineUrl: currentEngineUrl,
+      expectedNetwork: BASE_SEPOLIA_NETWORK,
+      timeoutMs: 30000,
+    });
+  });
+
+  it("trims values and defaults blank optional network and timeout settings", () => {
+    const config = loadTelegraphConfig({
+      TELEGRAPH_ENGINE_URL: `\n${currentEngineUrl} \t`,
+      TELEGRAPH_PRIVATE_KEY: `\n${syntheticPrivateKey}\r\n`,
+      TELEGRAPH_EXPECTED_NETWORK: " \n",
+      TELEGRAPH_TIMEOUT_MS: "\t",
+    });
+
+    expect(config).toMatchObject({
+      engineUrl: currentEngineUrl,
+      expectedNetwork: BASE_SEPOLIA_NETWORK,
+      timeoutMs: 30000,
+    });
+  });
+
   it("rejects missing required configuration", () => {
     expect(() => loadTelegraphConfig({})).toThrowError(ConfigurationError);
   });
@@ -60,6 +91,28 @@ describe("loadTelegraphConfig", () => {
         TELEGRAPH_EXPECTED_NETWORK: "mainnet",
       }),
     ).toThrowError(ConfigurationError);
+  });
+
+  it("reports only safe metadata for a malformed private key", () => {
+    const malformedKey = syntheticPrivateKey.slice(0, -1);
+    let error: unknown;
+    try {
+      loadTelegraphConfig({
+        TELEGRAPH_ENGINE_URL: currentEngineUrl,
+        TELEGRAPH_PRIVATE_KEY: malformedKey,
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(ConfigurationError);
+    const serialized = JSON.stringify(serializeError(error));
+    expect(serialized).not.toContain(syntheticPrivateKey);
+    expect(serialized).toContain("TELEGRAPH_PRIVATE_KEY");
+    expect(serialized).toContain('"trimmedLength":65');
+    expect(serialized).toContain('"matchesRequiredPattern":false');
+    expect(serialized).toContain('"validUrl":true');
+    expect(serialized).toContain('"normalizedValue":"eip155:84532"');
   });
 });
 

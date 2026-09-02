@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import * as actionsCore from "@actions/core";
 import { describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
 import {
@@ -20,6 +21,8 @@ import {
 } from "../packages/github/src";
 import {
   applyActionOutcome,
+  createTelegraphFactory,
+  formatActionError,
   type ActionOutcomeRuntime,
 } from "../action/src/main";
 import { aggregateDecisions } from "../action/src/aggregate";
@@ -278,6 +281,90 @@ describe("P3 action context and inputs", () => {
     expect(inputs.maxLookups).toBe(7);
     expect(inputs.telegraphPrivateKey).toBe("environment-example");
     expect(secrets).toEqual(["github-example", "environment-example"]);
+  });
+
+  it("passes Action inputs through Telegraph configuration validation", () => {
+    const values: Record<string, string> = {
+      "github-token": "github-example",
+      "telegraph-private-key": `0x${"b".repeat(64)}`,
+      "telegraph-engine-url": "http://13.237.89.59:7044/engine/v1/ask",
+      "expected-network": "",
+      "max-lookups": "5",
+    };
+    const inputs = readActionInputs({
+      getInput: (name) => values[name] ?? "",
+      setSecret: () => undefined,
+    }, {});
+    const factory = createTelegraphFactory(inputs, {});
+
+    expect(factory).toBeDefined();
+    expect(() => factory?.()).not.toThrow();
+  });
+
+  it("reads hyphenated inputs through the real Actions toolkit", () => {
+    const environmentKeys = [
+      "INPUT_GITHUB-TOKEN",
+      "INPUT_TELEGRAPH-PRIVATE-KEY",
+      "INPUT_TELEGRAPH-ENGINE-URL",
+      "INPUT_EXPECTED-NETWORK",
+      "INPUT_MAX-LOOKUPS",
+    ];
+    const previousValues = new Map(
+      environmentKeys.map((key) => [key, process.env[key]]),
+    );
+    try {
+      process.env["INPUT_GITHUB-TOKEN"] = "github-example";
+      process.env["INPUT_TELEGRAPH-PRIVATE-KEY"] = `0x${"d".repeat(64)}`;
+      process.env["INPUT_TELEGRAPH-ENGINE-URL"] =
+        "http://13.237.89.59:7044/engine/v1/ask";
+      process.env["INPUT_EXPECTED-NETWORK"] = "";
+      process.env["INPUT_MAX-LOOKUPS"] = "5";
+
+      const inputs = readActionInputs({
+        getInput: (name, options) => actionsCore.getInput(name, options),
+        setSecret: () => undefined,
+      }, {});
+      const factory = createTelegraphFactory(inputs, {});
+
+      expect(factory).toBeDefined();
+      expect(() => factory?.()).not.toThrow();
+    } finally {
+      for (const key of environmentKeys) {
+        const previousValue = previousValues.get(key);
+        if (previousValue === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = previousValue;
+        }
+      }
+    }
+  });
+
+  it("logs safe configuration diagnostics without including a private key", async () => {
+    const privateKey = `0x${"c".repeat(64)}`;
+    const invalidKey = privateKey.slice(0, -1);
+    let error: unknown;
+    try {
+      const inputs = readActionInputs({
+        getInput: (name) => ({
+          "github-token": "github-example",
+          "telegraph-private-key": invalidKey,
+          "telegraph-engine-url": "http://13.237.89.59:7044/engine/v1/ask",
+          "expected-network": "",
+          "max-lookups": "5",
+        })[name] ?? "",
+        setSecret: () => undefined,
+      }, {});
+      createTelegraphFactory(inputs, {})?.();
+    } catch (caught) {
+      error = caught;
+    }
+
+    const message = formatActionError(error);
+    expect(message).not.toContain(privateKey);
+    expect(message).toContain("TELEGRAPH_PRIVATE_KEY");
+    expect(message).toContain("trimmedLength");
+    expect(message).toContain("matchesRequiredPattern");
   });
 });
 

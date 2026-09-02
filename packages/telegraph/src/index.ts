@@ -6,8 +6,10 @@ export {
 } from "./network";
 
 export {
+  diagnoseTelegraphConfiguration,
   isBaseSepoliaConfig,
   loadTelegraphConfig,
+  type TelegraphConfigurationDiagnostics,
 } from "./config";
 
 export {
