@@ -72,6 +72,7 @@ export type {
   GitHubDependencySnapshotWarning,
   GitHubDependencyVulnerability,
   GitHubDependabotAlertDto,
+  GitHubDependabotVulnerabilityDto,
   GitHubEvidenceCandidate,
   GitHubEvidenceContext,
   GitHubEvidenceNormalizationResult,

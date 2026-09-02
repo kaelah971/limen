@@ -142,6 +142,24 @@ describe("GitHubClientImpl", () => {
     expect(calls.every((call) => call.init?.method === "GET")).toBe(true);
   });
 
+  it("rejects the legacy object-shaped Global Advisory fields", async () => {
+    const legacyAdvisory = {
+      ...globalAdvisoryMatching,
+      references: [{ url: "https://example.test/advisory" }],
+      vulnerabilities: globalAdvisoryMatching.vulnerabilities.map((vulnerability) => ({
+        ...vulnerability,
+        severity: "high",
+        first_patched_version: { identifier: "4.17.21" },
+      })),
+    };
+
+    await expect(
+      createClient([jsonResponse(legacyAdvisory)]).client.getGlobalAdvisory({
+        ghsaId: "GHSA-35jh-r3h4-6jhm",
+      }),
+    ).rejects.toThrowError(GitHubResponseError);
+  });
+
   it("retrieves a policy file at an explicit ref through the Contents API", async () => {
     const { client, calls } = createClient([
       jsonResponse({

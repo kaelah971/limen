@@ -10,10 +10,6 @@ import type {
   GitHubGlobalAdvisoryDto,
 } from "./types";
 
-function knownSeverity(value: Severity | null): value is Exclude<Severity, "UNKNOWN"> {
-  return value !== null && value !== "UNKNOWN";
-}
-
 function validCvssScore(value: number | null | undefined): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 10
     ? value
@@ -23,7 +19,7 @@ function validCvssScore(value: number | null | undefined): number | null {
 function advisoryCveId(dto: GitHubGlobalAdvisoryDto): string | null {
   const candidates = [
     normalizeCveId(dto.cve_id),
-    ...dto.identifiers
+    ...(dto.identifiers ?? [])
       .filter((identifier) => identifier.type.trim().toUpperCase() === "CVE")
       .map((identifier) => normalizeCveId(identifier.value)),
   ].filter((value): value is string => value !== null);
@@ -48,49 +44,41 @@ function advisoryCvssScore(dto: GitHubGlobalAdvisoryDto): number | null {
 
 function advisoryVulnerabilities(
   dto: GitHubGlobalAdvisoryDto,
+  severity: Severity,
 ): GitHubAdvisoryVulnerability[] {
-  return dto.vulnerabilities.map((vulnerability) => ({
-    ecosystem: normalizeEcosystem(vulnerability.package.ecosystem),
-    packageName: vulnerability.package.name.trim(),
-    severity: normalizeSeverity(vulnerability.severity),
-    vulnerableVersionRange:
-      vulnerability.vulnerable_version_range.trim() || null,
-    firstPatchedVersion:
-      vulnerability.first_patched_version?.identifier.trim() || null,
-  }));
-}
+  return (dto.vulnerabilities ?? []).flatMap((vulnerability) => {
+    const packageName = vulnerability.package?.name?.trim() ?? "";
+    if (packageName === "") {
+      return [];
+    }
 
-function assertAdvisorySeverityConsistency(
-  advisory: GitHubGlobalAdvisory,
-): void {
-  const knownSeverities = [
-    advisory.severity,
-    ...advisory.vulnerabilities.map((vulnerability) => vulnerability.severity),
-  ].filter(knownSeverity);
-  if (new Set(knownSeverities).size > 1) {
-    throw new GitHubEvidenceConflictError(
-      "GitHub global advisory contains conflicting severity values.",
-      { ghsaId: advisory.ghsaId },
-    );
-  }
+    return [{
+      ecosystem: normalizeEcosystem(vulnerability.package?.ecosystem ?? ""),
+      packageName,
+      severity,
+      vulnerableVersionRange:
+        vulnerability.vulnerable_version_range?.trim() || null,
+      firstPatchedVersion:
+        vulnerability.first_patched_version?.trim() || null,
+    }];
+  });
 }
 
 export function normalizeGlobalAdvisory(
   dto: GitHubGlobalAdvisoryDto,
 ): GitHubGlobalAdvisory {
+  const severity = normalizeSeverity(dto.severity);
   const advisory: GitHubGlobalAdvisory = {
     ghsaId: dto.ghsa_id.trim().toUpperCase(),
     cveId: advisoryCveId(dto),
     summary: dto.summary,
     description: dto.description,
-    severity:
-      dto.severity === null ? null : normalizeSeverity(dto.severity),
-    references: dto.references
-      .map((reference) => reference.url.trim())
+    severity,
+    references: (dto.references ?? [])
+      .map((reference) => reference.trim())
       .filter((reference) => reference.length > 0),
-    vulnerabilities: advisoryVulnerabilities(dto),
+    vulnerabilities: advisoryVulnerabilities(dto, severity),
     cvssScore: advisoryCvssScore(dto),
   };
-  assertAdvisorySeverityConsistency(advisory);
   return advisory;
 }

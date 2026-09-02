@@ -108,9 +108,9 @@ function makeAdvisory(
     references: [],
     vulnerabilities: [{
       package: { ecosystem: "npm", name },
-      severity: options.severity ?? "low",
       vulnerable_version_range: "<2.0.0",
-      first_patched_version: { identifier: "2.0.0" },
+      first_patched_version: "2.0.0",
+      vulnerable_functions: [],
     }],
     cvss: { score: 4.2 },
     cvss_severities: null,
@@ -462,10 +462,14 @@ describe("P3 orchestration", () => {
     const first = makeChange(1, { name: "package-a" });
     const second = makeChange(1, { name: "package-b" });
     const advisory = makeAdvisory(1, { name: "package-a" });
-    advisory.vulnerabilities.push({
-      ...advisory.vulnerabilities[0],
+    const firstVulnerability = advisory.vulnerabilities?.[0];
+    if (firstVulnerability === undefined) {
+      throw new Error("Expected the advisory fixture to contain a vulnerability.");
+    }
+    advisory.vulnerabilities = [...(advisory.vulnerabilities ?? []), {
+      ...firstVulnerability,
       package: { ecosystem: "npm", name: "package-b" },
-    });
+    }];
     const github = makeGitHubClient(
       [first, second],
       new Map([[advisory.ghsa_id, advisory]]),

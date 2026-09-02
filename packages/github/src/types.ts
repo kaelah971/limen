@@ -118,6 +118,16 @@ export interface GitHubDependencyChange {
 export interface GitHubAdvisoryVulnerabilityDto {
   package: {
     ecosystem: string;
+    name: string | null;
+  } | null;
+  vulnerable_version_range: string | null;
+  first_patched_version: string | null;
+  vulnerable_functions: string[] | null;
+}
+
+export interface GitHubDependabotVulnerabilityDto {
+  package: {
+    ecosystem: string;
     name: string;
   };
   severity: string;
@@ -141,11 +151,11 @@ export interface GitHubGlobalAdvisoryDto {
   ghsa_id: string;
   cve_id: string | null;
   summary: string;
-  description: string;
-  severity: string | null;
-  identifiers: { type: string; value: string }[];
-  references: { url: string }[];
-  vulnerabilities: GitHubAdvisoryVulnerabilityDto[];
+  description: string | null;
+  severity: string;
+  identifiers: { type: string; value: string }[] | null;
+  references: string[] | null;
+  vulnerabilities: GitHubAdvisoryVulnerabilityDto[] | null;
   cvss?: GitHubCvssDto | null;
   cvss_severities?: GitHubCvssSeveritiesDto | null;
 }
@@ -162,8 +172,8 @@ export interface GitHubGlobalAdvisory {
   ghsaId: string;
   cveId: string | null;
   summary: string;
-  description: string;
-  severity: Severity | null;
+  description: string | null;
+  severity: Severity;
   references: string[];
   vulnerabilities: GitHubAdvisoryVulnerability[];
   cvssScore: number | null;
@@ -182,7 +192,7 @@ export interface GitHubDependabotAlertDto {
     relationship: string | null;
   };
   security_advisory: GitHubGlobalAdvisoryDto;
-  security_vulnerability: GitHubAdvisoryVulnerabilityDto;
+  security_vulnerability: GitHubDependabotVulnerabilityDto;
 }
 
 export interface GitHubEvidenceContext {

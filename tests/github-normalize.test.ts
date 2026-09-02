@@ -124,11 +124,15 @@ describe("Dependency Review normalization", () => {
 
   it("does not use a vulnerability range for the wrong advisory package", () => {
     const change = normalizeDependencyReviewChange(dtoAt(dependencyReviewVulnerable));
+    const matchingVulnerability = (advisoryDto(globalAdvisoryMatching).vulnerabilities ?? [])[0];
+    if (matchingVulnerability === undefined) {
+      throw new Error("Expected the advisory fixture to contain a vulnerability.");
+    }
     const advisory = normalizeGlobalAdvisory({
       ...advisoryDto(globalAdvisoryMatching),
       vulnerabilities: [
         {
-          ...advisoryDto(globalAdvisoryMatching).vulnerabilities[0],
+          ...matchingVulnerability,
           package: { ecosystem: "npm", name: "other-package" },
         },
       ],
@@ -205,9 +209,6 @@ describe("Dependency Review normalization", () => {
     const advisory = normalizeGlobalAdvisory({
       ...advisoryDto(globalAdvisoryMatching),
       severity: "critical",
-      vulnerabilities: advisoryDto(globalAdvisoryMatching).vulnerabilities.map(
-        (vulnerability) => ({ ...vulnerability, severity: "critical" }),
-      ),
     });
 
     expect(() =>
@@ -231,6 +232,27 @@ describe("Dependency Review normalization", () => {
 });
 
 describe("Global Advisory normalization", () => {
+  it("normalizes the documented Global Advisory shape", () => {
+    const advisory = normalizeGlobalAdvisory(
+      advisoryDto(globalAdvisoryMatching),
+    );
+
+    expect(advisory).toMatchObject({
+      ghsaId: "GHSA-35JH-R3H4-6JHM",
+      cveId: "CVE-2021-23337",
+      severity: "HIGH",
+      references: ["https://nvd.nist.gov/vuln/detail/CVE-2021-23337"],
+      cvssScore: 7.2,
+      vulnerabilities: [{
+        ecosystem: "npm",
+        packageName: "lodash",
+        severity: "HIGH",
+        vulnerableVersionRange: "<4.17.21",
+        firstPatchedVersion: "4.17.21",
+      }],
+    });
+  });
+
   it("uses primary CVSS, then v3 and v4 fallback values", () => {
     const advisory = normalizeGlobalAdvisory({
       ...advisoryDto(globalAdvisoryMatching),

@@ -1,30 +1,30 @@
 {
   "ghsa_id": "GHSA-35jh-r3h4-6jhm",
   "cve_id": "CVE-2021-23337",
-  "summary": "Prototype pollution in lodash",
-  "description": "Lodash versions before 4.17.21 are vulnerable.",
+  "summary": "Command Injection in lodash",
+  "description": "`lodash` versions prior to 4.17.21 are vulnerable to Command Injection via the template function.",
   "severity": "high",
   "identifiers": [
     { "type": "GHSA", "value": "GHSA-35jh-r3h4-6jhm" },
     { "type": "CVE", "value": "CVE-2021-23337" }
   ],
   "references": [
-    { "url": "https://nvd.nist.gov/vuln/detail/CVE-2021-23337" }
+    "https://nvd.nist.gov/vuln/detail/CVE-2021-23337"
   ],
   "vulnerabilities": [
     {
       "package": { "ecosystem": "npm", "name": "lodash" },
-      "severity": "high",
       "vulnerable_version_range": "<4.17.21",
-      "first_patched_version": { "identifier": "4.17.21" }
+      "first_patched_version": "4.17.21",
+      "vulnerable_functions": []
     }
   ],
-  "cvss": {
-    "score": 7.2,
-    "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
-  },
+  "cvss": { "score": 7.2, "vector_string": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H" },
   "cvss_severities": {
-    "cvss_v3": { "score": 7.2, "vector_string": "CVSS:3.1" },
-    "cvss_v4": null
+    "cvss_v3": {
+      "score": 7.2,
+      "vector_string": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H"
+    },
+    "cvss_v4": { "score": 0.0, "vector_string": null }
   }
 }

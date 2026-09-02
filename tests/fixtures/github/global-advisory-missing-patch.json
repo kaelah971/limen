@@ -12,9 +12,9 @@
   "vulnerabilities": [
     {
       "package": { "ecosystem": "npm", "name": "lodash" },
-      "severity": "high",
       "vulnerable_version_range": "<4.17.21",
-      "first_patched_version": null
+      "first_patched_version": null,
+      "vulnerable_functions": []
     }
   ],
   "cvss": { "score": 7.2 },

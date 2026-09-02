@@ -21,9 +21,9 @@
     "vulnerabilities": [
       {
         "package": { "ecosystem": "npm", "name": "eslint" },
-        "severity": "medium",
         "vulnerable_version_range": ">=8.0.0 <8.5.0",
-        "first_patched_version": { "identifier": "8.5.0" }
+        "first_patched_version": "8.5.0",
+        "vulnerable_functions": []
       }
     ],
     "cvss": { "score": 5.0 },

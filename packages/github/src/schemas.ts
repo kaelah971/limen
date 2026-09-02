@@ -45,16 +45,32 @@ export const DependencyReviewResponseSchema = z.union([
   DependencyReviewEnvelopeSchema,
 ]);
 
-const AdvisoryPackageSchema = z
+const DependabotPackageSchema = z
   .object({
     ecosystem: z.string(),
     name: z.string(),
   })
   .passthrough();
 
-const AdvisoryVulnerabilitySchema = z
+const GlobalAdvisoryPackageSchema = z
   .object({
-    package: AdvisoryPackageSchema,
+    ecosystem: z.string(),
+    name: z.string().nullable(),
+  })
+  .passthrough();
+
+const GlobalAdvisoryVulnerabilitySchema = z
+  .object({
+    package: GlobalAdvisoryPackageSchema.nullable(),
+    vulnerable_version_range: z.string().nullable(),
+    first_patched_version: z.string().nullable(),
+    vulnerable_functions: z.array(z.string()).nullable(),
+  })
+  .passthrough();
+
+const DependabotVulnerabilitySchema = z
+  .object({
+    package: DependabotPackageSchema,
     severity: z.string(),
     vulnerable_version_range: z.string(),
     first_patched_version: z
@@ -83,11 +99,13 @@ export const GlobalAdvisorySchema = z
     ghsa_id: z.string().min(1),
     cve_id: z.string().nullable(),
     summary: z.string(),
-    description: z.string(),
-    severity: z.string().nullable(),
-    identifiers: z.array(z.object({ type: z.string(), value: z.string() })),
-    references: z.array(z.object({ url: z.string() })),
-    vulnerabilities: z.array(AdvisoryVulnerabilitySchema),
+    description: z.string().nullable(),
+    severity: z.string(),
+    identifiers: z
+      .array(z.object({ type: z.string(), value: z.string() }))
+      .nullable(),
+    references: z.array(z.string()).nullable(),
+    vulnerabilities: z.array(GlobalAdvisoryVulnerabilitySchema).nullable(),
     cvss: CvssSchema.nullable().optional(),
     cvss_severities: CvssSeveritiesSchema.nullable().optional(),
   })
@@ -99,14 +117,14 @@ export const DependabotAlertSchema = z
     state: z.enum(["auto_dismissed", "dismissed", "fixed", "open"]),
     dependency: z
       .object({
-        package: AdvisoryPackageSchema,
+        package: DependabotPackageSchema,
         manifest_path: z.string().nullable(),
         scope: z.string().nullable(),
         relationship: z.string().nullable(),
       })
       .passthrough(),
     security_advisory: GlobalAdvisorySchema,
-    security_vulnerability: AdvisoryVulnerabilitySchema,
+    security_vulnerability: DependabotVulnerabilitySchema,
   })
   .passthrough();
 
