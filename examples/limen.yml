@@ -1,0 +1,12 @@
+production:
+  block_severity:
+    - critical
+    - high
+
+  dependency_scopes:
+    - runtime
+
+  missing_external_evidence: review
+  severity_conflict: review
+  cve_identity_conflict: review
+  telegraph_failure: review
