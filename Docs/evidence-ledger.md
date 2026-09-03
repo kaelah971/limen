@@ -26,7 +26,7 @@ Supabase Postgres
 
 The Action never receives a Supabase service-role key. It sends one complete evidence package after the release decision is calculated. The API validates and redacts the package before calling the `persist_limen_run` Postgres function, which inserts the run and its child records in one transaction.
 
-The API is intentionally a small Node/TypeScript HTTP service under `apps/api/`. It has no frontend, account system, public receipt route, or browser-side database access.
+The API is intentionally a small Node/TypeScript HTTP service under `apps/api/`. It has no frontend, account system, or browser-side database access. P5 ledger reads remain private; P6 adds a separate opt-in public receipt JSON route described in [`evidence-receipts.md`](evidence-receipts.md).
 
 ## Canonical Evidence Mapping
 
@@ -98,7 +98,7 @@ Both require `Authorization: Bearer <LIMEN_INGEST_TOKEN>`. This is machine-to-ma
 
 `POST` returns `{ "id": "LM-RUN-...", "created": true|false }`. A retry for the same GitHub run identity returns the existing ID with `created: false`.
 
-`GET` is backend-authenticated and returns the run envelope, canonical decisions and safe Telegraph request records. It is not a public receipt endpoint; P6 owns public shareable receipts.
+`GET` is backend-authenticated and returns the run envelope, canonical decisions and safe Telegraph request records. It is not a public receipt endpoint; P6's separate receipt route owns public shareable projections.
 
 ## Atomic Persistence
 

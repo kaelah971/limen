@@ -188,6 +188,31 @@ The service role is loaded only by `apps/api/src/supabase.ts`. It is not importe
 
 If ledger configuration is absent or persistence fails, the Action preserves the already-calculated `PASS`, `HOLD`, or `REVIEW`, emits a safe ledger status in the summary, and does not rewrite the release decision. Historical R0 data has an explicit, manual-only sanitized backfill path and is classified as `demo`.
 
-## P0/P1/P2/P4/P3/P5 Boundary
+## P6 Evidence Receipts
 
-P0/P1/P2/P4/P3/P5 contain the external evidence contracts, Telegraph adapter, policy loader, read-only GitHub adapter, bundled GitHub Action, and server-owned sanitized evidence ledger. They intentionally contain no durable public receipts, web UI, dashboard, GitHub App installation, billing, or design-system implementation. Those remain later milestones in the approved build plan.
+P6 adds a server-only `packages/receipts/` projection and the API's opt-in
+receipt routes. It consumes authoritative `PersistedRunDetail`, emits only an
+explicit public allowlist, hashes the canonical snapshot with SHA-256, and
+stores it in a service-role-only `receipts` table. Publication is authenticated
+and idempotent; retrieval is public JSON; revocation is authenticated and
+returns `410` without the stored snapshot.
+
+P6.1 live validation is recorded in [`evidence/p6/README.md`](../evidence/p6/README.md).
+P6 receipt infrastructure is live-verified against the dedicated hosted
+Supabase project ref `epmpciglqswrahgvbchz`. The active canonical public demo
+receipt is the HOLD receipt `LM-REC-B1306724D0B84B6EBDDF7E36`; the PASS receipt
+used for the lifecycle check was intentionally revoked and is not active. The
+validation proves the documented publication, public projection, idempotency,
+private-ledger boundary, RLS, and revocation behavior for controlled
+`usageClass=demo`, `source=backfill` records. It does not claim production
+adoption, external users, mainnet activity, or universal safety.
+
+## P0/P1/P2/P4/P3/P5/P6 Boundary
+
+P0/P1/P2/P4/P3/P5/P6 contain the external evidence contracts, Telegraph
+adapter, policy loader, read-only GitHub adapter, bundled GitHub Action,
+server-owned sanitized evidence ledger, and server-owned public receipt
+projection. They intentionally contain no web UI, dashboard, account system,
+GitHub App installation, billing, automatic Action receipt publication, or
+design-system implementation. Those remain later milestones in the approved
+build plan.

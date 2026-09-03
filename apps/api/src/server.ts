@@ -5,18 +5,35 @@ import {
   isLedgerRunId,
   validateLedgerRunIngest,
 } from "../../../packages/ledger/src";
+import {
+  ReceiptIdParamSchema,
+  ReceiptPublicationRequestSchema,
+  hashReceiptSnapshot,
+  projectReceiptSnapshot,
+} from "../../../packages/receipts/src";
 import type {
   EvidenceLedger,
   PersistedRun,
   PersistedRunDetail,
 } from "../../../packages/ledger/src";
-import { LedgerConflictError, LedgerPersistenceError } from "./repository";
+import type { EvidenceReceiptStore } from "../../../packages/receipts/src";
+import {
+  LedgerConflictError,
+  LedgerPersistenceError,
+} from "./repository";
+import {
+  ReceiptConflictError,
+  ReceiptNotFoundError,
+  ReceiptPersistenceError,
+  ReceiptRevokedError,
+} from "./receipt-repository";
 
 const DEFAULT_MAX_BODY_BYTES = 2 * 1024 * 1024;
 
 export interface LedgerServerOptions {
   ledger: EvidenceLedger;
   ingestToken: string;
+  receipts?: EvidenceReceiptStore;
   maxBodyBytes?: number;
 }
 
@@ -49,13 +66,17 @@ function tokenMatches(actual: string | undefined, expected: string): boolean {
   return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
 }
 
-function authorize(request: IncomingMessage, expectedToken: string): void {
+function authorize(
+  request: IncomingMessage,
+  expectedToken: string,
+  errorCode = "LEDGER_UNAUTHORIZED",
+): void {
   const header = request.headers.authorization;
   const token = typeof header === "string" && header.startsWith("Bearer ")
     ? header.slice("Bearer ".length)
     : undefined;
   if (!tokenMatches(token, expectedToken)) {
-    throw new LedgerApiRequestError(401, "LEDGER_UNAUTHORIZED", "A valid ledger token is required.");
+    throw new LedgerApiRequestError(401, errorCode, "A valid ledger token is required.");
   }
 }
 
@@ -118,6 +139,67 @@ async function retrieveRun(
   return result;
 }
 
+async function publishReceipt(
+  request: IncomingMessage,
+  options: LedgerServerOptions,
+): Promise<unknown> {
+  authorize(request, options.ingestToken, "RECEIPT_UNAUTHORIZED");
+  if (options.receipts === undefined) {
+    throw new LedgerApiRequestError(503, "RECEIPTS_NOT_CONFIGURED", "Evidence receipts are not configured.");
+  }
+  const parsed = ReceiptPublicationRequestSchema.safeParse(
+    await readJsonBody(request, options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES),
+  );
+  if (!parsed.success) {
+    throw new LedgerApiRequestError(400, "RECEIPT_INVALID_REQUEST", "Receipt publication request is invalid.");
+  }
+  const run = await options.ledger.getRun(parsed.data.runId);
+  if (run === null) {
+    throw new LedgerApiRequestError(404, "RECEIPT_RUN_NOT_FOUND", "The ledger run was not found.");
+  }
+  const snapshot = projectReceiptSnapshot(run);
+  return options.receipts.publishReceipt({
+    runId: parsed.data.runId,
+    snapshot,
+    snapshotHash: hashReceiptSnapshot(snapshot),
+  });
+}
+
+async function retrieveReceipt(
+  options: LedgerServerOptions,
+  id: string,
+): Promise<unknown> {
+  if (options.receipts === undefined) {
+    throw new LedgerApiRequestError(503, "RECEIPTS_NOT_CONFIGURED", "Evidence receipts are not configured.");
+  }
+  if (!ReceiptIdParamSchema.safeParse(id).success) {
+    throw new LedgerApiRequestError(400, "RECEIPT_INVALID_ID", "Receipt ID is invalid.");
+  }
+  const result = await options.receipts.getReceipt(id);
+  if (result === null) {
+    throw new LedgerApiRequestError(404, "RECEIPT_NOT_FOUND", "The receipt was not found.");
+  }
+  if (result.status === "revoked") {
+    throw new LedgerApiRequestError(410, "RECEIPT_REVOKED", "The receipt has been revoked.");
+  }
+  return result.receipt;
+}
+
+async function revokeReceipt(
+  request: IncomingMessage,
+  options: LedgerServerOptions,
+  id: string,
+): Promise<unknown> {
+  authorize(request, options.ingestToken, "RECEIPT_UNAUTHORIZED");
+  if (options.receipts === undefined) {
+    throw new LedgerApiRequestError(503, "RECEIPTS_NOT_CONFIGURED", "Evidence receipts are not configured.");
+  }
+  if (!ReceiptIdParamSchema.safeParse(id).success) {
+    throw new LedgerApiRequestError(400, "RECEIPT_INVALID_ID", "Receipt ID is invalid.");
+  }
+  return options.receipts.revokeReceipt(id);
+}
+
 async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
@@ -131,6 +213,18 @@ async function handleRequest(
     }
     if (request.method === "GET" && path.length === 4 && path[0] === "v1" && path[1] === "ledger" && path[2] === "runs") {
       sendJson(response, 200, await retrieveRun(request, options, path[3] ?? ""));
+      return;
+    }
+    if (request.method === "POST" && path.length === 2 && path[0] === "v1" && path[1] === "receipts") {
+      sendJson(response, 200, await publishReceipt(request, options));
+      return;
+    }
+    if (request.method === "GET" && path.length === 3 && path[0] === "v1" && path[1] === "receipts") {
+      sendJson(response, 200, await retrieveReceipt(options, path[2] ?? ""));
+      return;
+    }
+    if (request.method === "POST" && path.length === 4 && path[0] === "v1" && path[1] === "receipts" && path[3] === "revoke") {
+      sendJson(response, 200, await revokeReceipt(request, options, path[2] ?? ""));
       return;
     }
     throw new LedgerApiRequestError(404, "LEDGER_ROUTE_NOT_FOUND", "Ledger route was not found.");
@@ -149,6 +243,22 @@ async function handleRequest(
     }
     if (error instanceof LedgerPersistenceError) {
       sendJson(response, 500, { code: error.code, message: "The evidence ledger is temporarily unavailable." });
+      return;
+    }
+    if (error instanceof ReceiptConflictError) {
+      sendJson(response, 409, { code: error.code, message: error.message });
+      return;
+    }
+    if (error instanceof ReceiptRevokedError) {
+      sendJson(response, 409, { code: error.code, message: error.message });
+      return;
+    }
+    if (error instanceof ReceiptNotFoundError) {
+      sendJson(response, 404, { code: error.code, message: "The receipt was not found." });
+      return;
+    }
+    if (error instanceof ReceiptPersistenceError) {
+      sendJson(response, 500, { code: error.code, message: "The evidence receipt service is temporarily unavailable." });
       return;
     }
     sendJson(response, 500, { code: "LEDGER_INTERNAL_ERROR", message: "The evidence ledger request failed." });

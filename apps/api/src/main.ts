@@ -1,12 +1,16 @@
 import { createLedgerServer } from "./server";
 import { loadLedgerApiConfig } from "./config";
 import { SupabaseEvidenceLedger } from "./repository";
+import { SupabaseEvidenceReceiptStore } from "./receipt-repository";
 import { createServerSupabaseClient } from "./supabase";
 
 const config = loadLedgerApiConfig();
-const ledger = new SupabaseEvidenceLedger(createServerSupabaseClient(config));
+const client = createServerSupabaseClient(config);
+const ledger = new SupabaseEvidenceLedger(client);
+const receipts = new SupabaseEvidenceReceiptStore(client);
 const server = createLedgerServer({
   ledger,
+  receipts,
   ingestToken: config.ingestToken,
 });
 
