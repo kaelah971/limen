@@ -71,7 +71,7 @@ export interface TelegraphCveEvidence {
   network: string | null;
   paymentScheme: string | null;
 
-  requestedAt: string;
+  requestedAt: string | null;
   receivedAt: string | null;
 
   raw: unknown;
@@ -145,7 +145,7 @@ export interface LimenDecisionResult {
   repositoryEvidence: RepositoryExposureEvidence;
   telegraphEvidence: TelegraphCveEvidence | null;
   checks: DecisionCheck[];
-  evaluatedAt: string;
+  evaluatedAt: string | null;
   policyVersion: string;
 }
 

@@ -68,7 +68,7 @@ export const TelegraphCveEvidenceSchema = z
     durationMs: z.number().int().min(0).nullable(),
     network: z.string().nullable(),
     paymentScheme: z.string().nullable(),
-    requestedAt: z.string().min(1),
+    requestedAt: z.string().min(1).nullable(),
     receivedAt: z.string().nullable(),
     raw: z.unknown(),
   })
@@ -158,7 +158,7 @@ export const LimenDecisionResultSchema = z
     repositoryEvidence: RepositoryExposureEvidenceSchema,
     telegraphEvidence: TelegraphCveEvidenceSchema.nullable(),
     checks: z.array(DecisionCheckSchema),
-    evaluatedAt: z.string().min(1),
+    evaluatedAt: z.string().min(1).nullable(),
     policyVersion: z.string().min(1),
   })
   .strict();

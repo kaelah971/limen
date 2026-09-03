@@ -13,6 +13,19 @@ import type {
   PersistedRunDetail,
 } from "../../../packages/ledger/src";
 
+const LEDGER_IDEMPOTENCY_CONFLICT_CODE = "P0001";
+const LEDGER_IDEMPOTENCY_CONFLICT_MESSAGE =
+  "Ledger idempotency key conflicts with an existing run.";
+
+export class LedgerConflictError extends Error {
+  readonly code = "LEDGER_IDEMPOTENCY_CONFLICT" as const;
+
+  constructor() {
+    super("This GitHub run attempt already exists with different evidence.");
+    this.name = "LedgerConflictError";
+  }
+}
+
 export class LedgerPersistenceError extends Error {
   readonly code = "LEDGER_PERSISTENCE_ERROR" as const;
 
@@ -82,7 +95,7 @@ function mapDecision(rowValue: unknown): unknown {
     repositoryEvidence: row.repository_evidence,
     telegraphEvidence: row.telegraph_evidence,
     checks: row.checks,
-    evaluatedAt: row.evaluated_at,
+    evaluatedAt: row.evaluated_at === null ? null : row.evaluated_at,
     policyVersion: row.policy_version,
   };
 }
@@ -98,7 +111,7 @@ function mapTelegraphRequest(rowValue: unknown): unknown {
     durationMs: row.duration_ms === null ? null : numericRow(row.duration_ms),
     network: row.network,
     paymentScheme: row.payment_scheme,
-    requestedAt: row.requested_at,
+    requestedAt: row.requested_at === null ? null : row.requested_at,
     receivedAt: row.received_at,
     outcome: row.outcome,
     settlementReference: row.settlement_reference,
@@ -129,6 +142,12 @@ export class SupabaseEvidenceLedger implements EvidenceLedger {
       payload: storageInput,
     });
     if (error) {
+      if (
+        error.code === LEDGER_IDEMPOTENCY_CONFLICT_CODE &&
+        error.message === LEDGER_IDEMPOTENCY_CONFLICT_MESSAGE
+      ) {
+        throw new LedgerConflictError();
+      }
       throw new LedgerPersistenceError("The evidence ledger could not persist the run.");
     }
 

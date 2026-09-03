@@ -10,7 +10,7 @@ import type {
   PersistedRun,
   PersistedRunDetail,
 } from "../../../packages/ledger/src";
-import { LedgerPersistenceError } from "./repository";
+import { LedgerConflictError, LedgerPersistenceError } from "./repository";
 
 const DEFAULT_MAX_BODY_BYTES = 2 * 1024 * 1024;
 
@@ -141,6 +141,10 @@ async function handleRequest(
     }
     if (error instanceof LedgerValidationError) {
       sendJson(response, 400, { code: error.code, message: error.message });
+      return;
+    }
+    if (error instanceof LedgerConflictError) {
+      sendJson(response, 409, { code: error.code, message: error.message });
       return;
     }
     if (error instanceof LedgerPersistenceError) {

@@ -61,10 +61,18 @@ describe("normalizeTelegraphEvidence", () => {
       network: "eip155:84532",
       paymentScheme: "exact",
     });
+    expect(evidence.requestedAt).toBe("2026-09-02T10:00:00.000Z");
     expect(evidence.raw).toMatchObject({
       provider_specific_field: { retained: true },
     });
     expect(TelegraphCveEvidenceSchema.safeParse(evidence).success).toBe(true);
+  });
+
+  it("represents historical evidence with an unknown request time", () => {
+    const evidence = normalizeTelegraphEvidence(null, context);
+    const historicalEvidence = { ...evidence, requestedAt: null };
+
+    expect(TelegraphCveEvidenceSchema.safeParse(historicalEvidence).success).toBe(true);
   });
 
   it("keeps missing optional evidence explicit", () => {

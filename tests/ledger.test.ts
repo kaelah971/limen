@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createLedgerServer,
+  LedgerConflictError,
   LedgerPersistenceError,
   SupabaseEvidenceLedger,
 } from "../apps/api/src";
@@ -85,7 +86,10 @@ const telegraphEvidence: TelegraphCveEvidence = {
   raw: { provider: "sanitized" },
 };
 
-function makeDecision(decision: "PASS" | "HOLD" | "REVIEW"): LimenDecisionResult {
+function makeDecision(
+  decision: "PASS" | "HOLD" | "REVIEW",
+  requestedAt: string | null = telegraphEvidence.requestedAt,
+): LimenDecisionResult {
   return {
     id: "decision-1",
     decision,
@@ -95,7 +99,7 @@ function makeDecision(decision: "PASS" | "HOLD" | "REVIEW"): LimenDecisionResult
     repositoryEvidence: decision === "PASS"
       ? { ...repositoryEvidence, exposureState: "patched", installedVersion: "4.18.1" }
       : repositoryEvidence,
-    telegraphEvidence: decision === "PASS" ? null : telegraphEvidence,
+    telegraphEvidence: decision === "PASS" ? null : { ...telegraphEvidence, requestedAt },
     checks: [],
     evaluatedAt: "2026-09-02T10:00:00.000Z",
     policyVersion: POLICY_VERSION,
@@ -104,6 +108,7 @@ function makeDecision(decision: "PASS" | "HOLD" | "REVIEW"): LimenDecisionResult
 
 function makeRequest(
   cveId = "CVE-2021-23337",
+  requestedAt: string | null = telegraphEvidence.requestedAt,
 ): LedgerRunIngest["telegraphRequests"][number] {
   return {
     cveId,
@@ -114,7 +119,7 @@ function makeRequest(
     durationMs: telegraphEvidence.durationMs,
     network: telegraphEvidence.network,
     paymentScheme: telegraphEvidence.paymentScheme,
-    requestedAt: telegraphEvidence.requestedAt,
+    requestedAt,
     receivedAt: telegraphEvidence.receivedAt,
     outcome: "success",
     settlementReference: null,
@@ -205,6 +210,83 @@ describe("ledger contract", () => {
     expect(pass.run.overallDecision).toBe("PASS");
     expect(pass.run.telegraphRequestCount).toBe(0);
     expect(pass.telegraphRequests).toEqual([]);
+  });
+
+  it("allows unknown backfill request times but requires action request times", () => {
+    const backfill = makeIngest("HOLD");
+    backfill.telegraphRequests.forEach((request) => { request.requestedAt = null; });
+    backfill.decisions[0]!.telegraphEvidence = {
+      ...telegraphEvidence,
+      requestedAt: null,
+    };
+    backfill.decisions[0]!.evaluatedAt = null;
+    expect(validateLedgerRunIngest(backfill).telegraphRequests[0]?.requestedAt).toBeNull();
+    expect(validateLedgerRunIngest(backfill).decisions[0]?.telegraphEvidence?.requestedAt)
+      .toBeNull();
+    expect(validateLedgerRunIngest(backfill).decisions[0]?.evaluatedAt).toBeNull();
+
+    const actionWithoutTimestamp = makeIngest("HOLD");
+    actionWithoutTimestamp.run.source = "action";
+    actionWithoutTimestamp.run.usageClass = "production";
+    actionWithoutTimestamp.run.isTest = false;
+    actionWithoutTimestamp.telegraphRequests[0]!.requestedAt = null;
+    expect(() => validateLedgerRunIngest(actionWithoutTimestamp)).toThrow(/requestedAt/i);
+
+    const actionDecisionWithoutTimestamp = makeIngest("HOLD");
+    actionDecisionWithoutTimestamp.run.source = "action";
+    actionDecisionWithoutTimestamp.run.usageClass = "production";
+    actionDecisionWithoutTimestamp.run.isTest = false;
+    actionDecisionWithoutTimestamp.decisions[0]!.telegraphEvidence = {
+      ...telegraphEvidence,
+      requestedAt: null,
+    };
+    expect(() => validateLedgerRunIngest(actionDecisionWithoutTimestamp)).toThrow(/requestedAt/i);
+
+    const actionDecisionWithoutEvaluationTime = makeIngest("HOLD");
+    actionDecisionWithoutEvaluationTime.run.source = "action";
+    actionDecisionWithoutEvaluationTime.run.usageClass = "production";
+    actionDecisionWithoutEvaluationTime.run.isTest = false;
+    actionDecisionWithoutEvaluationTime.decisions[0]!.evaluatedAt = null;
+    expect(() => validateLedgerRunIngest(actionDecisionWithoutEvaluationTime))
+      .toThrow(/evaluatedAt/i);
+
+    const actionWithTimestamp = makeIngest("HOLD");
+    actionWithTimestamp.run.source = "action";
+    actionWithTimestamp.run.usageClass = "production";
+    actionWithTimestamp.run.isTest = false;
+    const validatedAction = validateLedgerRunIngest(actionWithTimestamp);
+    expect(validatedAction.telegraphRequests[0]?.requestedAt)
+      .toBe("2026-09-02T10:00:00.000Z");
+    expect(validatedAction.decisions[0]?.telegraphEvidence?.requestedAt)
+      .toBe("2026-09-02T10:00:00.000Z");
+    expect(validatedAction.decisions[0]?.evaluatedAt)
+      .toBe("2026-09-02T10:00:00.000Z");
+  });
+
+  it("validates an R0-shaped five-decision HOLD with unknown historical timing", () => {
+    const historical = makeIngest("HOLD");
+    const template = historical.decisions[0]!;
+    historical.telegraphRequests.forEach((request) => { request.requestedAt = null; });
+    historical.decisions = historical.telegraphRequests.map((request, index) => ({
+      ...template,
+      id: `decision-${index + 1}`,
+      cveId: request.cveId,
+      repositoryEvidence: {
+        ...template.repositoryEvidence,
+        cveId: request.cveId,
+      },
+      telegraphEvidence: template.telegraphEvidence === null
+        ? null
+        : { ...template.telegraphEvidence, cveId: request.cveId, requestedAt: null },
+      evaluatedAt: null,
+    }));
+    historical.run.decisionCount = 5;
+    historical.run.holdCount = 5;
+
+    const validated = validateLedgerRunIngest(historical);
+    expect(validated.decisions).toHaveLength(5);
+    expect(validated.decisions.every((decision) => decision.evaluatedAt === null)).toBe(true);
+    expect(validated.telegraphRequests).toHaveLength(5);
   });
 
   it("rejects duplicate decisions, duplicate CVE request records, and secret fields", () => {
@@ -381,6 +463,55 @@ describe("ledger ingest API", () => {
     expect(response.status).toBe(400);
     expect(ledger.persistRun).not.toHaveBeenCalled();
   });
+
+  it("maps an idempotency conflict to 409 without exposing database details", async () => {
+    const ledger: EvidenceLedger = {
+      persistRun: vi.fn().mockRejectedValue(new LedgerConflictError()),
+      getRun: vi.fn(),
+    };
+    server = createLedgerServer({ ledger, ingestToken: "ingest-secret" });
+    await new Promise<void>((resolve) => server?.listen(0, "127.0.0.1", () => resolve()));
+    const address = server.address() as AddressInfo;
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/v1/ledger/runs`, {
+      method: "POST",
+      headers: { authorization: "Bearer ingest-secret", "content-type": "application/json" },
+      body: JSON.stringify(makeIngest("PASS")),
+    });
+
+    expect(response.status).toBe(409);
+    const body = await response.json() as Record<string, unknown>;
+    expect(body).toEqual({
+      code: "LEDGER_IDEMPOTENCY_CONFLICT",
+      message: "This GitHub run attempt already exists with different evidence.",
+    });
+    expect(JSON.stringify(body)).not.toContain("P0001");
+    expect(JSON.stringify(body)).not.toContain("database");
+  });
+
+  it("keeps generic persistence failures at 500 with a safe response", async () => {
+    const ledger: EvidenceLedger = {
+      persistRun: vi.fn().mockRejectedValue(new LedgerPersistenceError("internal database secret")),
+      getRun: vi.fn(),
+    };
+    server = createLedgerServer({ ledger, ingestToken: "ingest-secret" });
+    await new Promise<void>((resolve) => server?.listen(0, "127.0.0.1", () => resolve()));
+    const address = server.address() as AddressInfo;
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/v1/ledger/runs`, {
+      method: "POST",
+      headers: { authorization: "Bearer ingest-secret", "content-type": "application/json" },
+      body: JSON.stringify(makeIngest("PASS")),
+    });
+
+    expect(response.status).toBe(500);
+    const body = await response.json() as Record<string, unknown>;
+    expect(body).toEqual({
+      code: "LEDGER_PERSISTENCE_ERROR",
+      message: "The evidence ledger is temporarily unavailable.",
+    });
+    expect(JSON.stringify(body)).not.toContain("internal database secret");
+  });
 });
 
 describe("Supabase repository boundary", () => {
@@ -401,6 +532,51 @@ describe("Supabase repository boundary", () => {
     });
     expect(rpc.mock.calls[0]?.[1].payload.decisions[0].telegraphEvidence.raw).toBeNull();
     expect(JSON.stringify(rpc.mock.calls)).not.toContain("SUPABASE_SERVICE_ROLE_KEY");
+  });
+
+  it("classifies only the exact RPC idempotency conflict", async () => {
+    const knownConflict = vi.fn().mockResolvedValue({
+      data: null,
+      error: {
+        code: "P0001",
+        message: "Ledger idempotency key conflicts with an existing run.",
+        details: "sensitive database details",
+        hint: "sensitive database hint",
+      },
+    });
+    const conflictRepository = new SupabaseEvidenceLedger({
+      rpc: knownConflict,
+    } as unknown as SupabaseClient);
+    await expect(conflictRepository.persistRun(makeIngest("PASS")))
+      .rejects.toThrowError(LedgerConflictError);
+
+    const otherP0001 = vi.fn().mockResolvedValue({
+      data: null,
+      error: {
+        code: "P0001",
+        message: "A different database rule failed.",
+        details: "sensitive database details",
+        hint: "sensitive database hint",
+      },
+    });
+    const otherRepository = new SupabaseEvidenceLedger({
+      rpc: otherP0001,
+    } as unknown as SupabaseClient);
+    await expect(otherRepository.persistRun(makeIngest("PASS")))
+      .rejects.toThrowError(LedgerPersistenceError);
+  });
+
+  it("returns an exact duplicate result without changing its meaning", async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: { id: "LM-RUN-TEST-001", created: false },
+      error: null,
+    });
+    const repository = new SupabaseEvidenceLedger({ rpc } as unknown as SupabaseClient);
+
+    await expect(repository.persistRun(makeIngest("PASS"))).resolves.toEqual({
+      id: "LM-RUN-TEST-001",
+      created: false,
+    });
   });
 
   it("maps stored run, canonical decisions, and Telegraph records on retrieval", async () => {
@@ -443,10 +619,10 @@ describe("Supabase repository boundary", () => {
       repository_evidence: decision.repositoryEvidence,
       telegraph_evidence: decision.telegraphEvidence,
       checks: decision.checks,
-      evaluated_at: decision.evaluatedAt,
+      evaluated_at: null,
       policy_version: decision.policyVersion,
     };
-    const requestRows = source.telegraphRequests.map((request) => ({
+    const requestRows = source.telegraphRequests.map((request, index) => ({
       cve_id: request.cveId,
       intent: request.intent,
       miner_id: request.minerId,
@@ -455,7 +631,7 @@ describe("Supabase repository boundary", () => {
       duration_ms: String(request.durationMs),
       network: request.network,
       payment_scheme: request.paymentScheme,
-      requested_at: request.requestedAt,
+      requested_at: index === 0 ? null : request.requestedAt,
       received_at: request.receivedAt,
       outcome: request.outcome,
       settlement_reference: request.settlementReference,
@@ -477,7 +653,9 @@ describe("Supabase repository boundary", () => {
     expect(retrieved).not.toBeNull();
     expect(retrieved?.run).toMatchObject({ overallDecision: "HOLD", usageClass: "demo" });
     expect(retrieved?.decisions).toMatchObject([{ id: "decision-1", decision: "HOLD" }]);
+    expect(retrieved?.decisions[0]?.evaluatedAt).toBeNull();
     expect(retrieved?.telegraphRequests).toHaveLength(5);
+    expect(retrieved?.telegraphRequests[0]?.requestedAt).toBeNull();
     expect(retrieved?.telegraphRequests).toEqual(expect.arrayContaining([
       expect.objectContaining({ cveId: "CVE-2021-23337", costUsd: 0.01 }),
       expect.objectContaining({ cveId: "CVE-2021-23341", costUsd: 0.01 }),
@@ -509,5 +687,17 @@ describe("Supabase repository boundary", () => {
     expect(migration).toContain("alter table public.runs enable row level security");
     expect(migration).toContain("revoke all on table public.runs, public.decisions, public.telegraph_requests from anon, authenticated");
     expect(migration).toContain("persist_limen_run(payload jsonb)");
+
+    const additiveMigration = await readFile(
+      "supabase/migrations/20260902010000_allow_null_backfill_telegraph_requested_at.sql",
+      "utf8",
+    );
+    expect(additiveMigration).toContain("alter column requested_at drop not null");
+
+    const decisionTimestampMigration = await readFile(
+      "supabase/migrations/20260902020000_allow_null_backfill_decision_evaluated_at.sql",
+      "utf8",
+    );
+    expect(decisionTimestampMigration).toContain("alter column evaluated_at drop not null");
   });
 });

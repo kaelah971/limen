@@ -59,11 +59,11 @@ Stores one release-check execution: repository, PR number, base/head SHAs, GitHu
 
 ### `decisions`
 
-Stores one row per canonical `LimenDecisionResult`, linked to `runs(id)` with cascade delete. `(run_id, decision_id)` is unique. Repository and Telegraph evidence remain source-separated JSONB values.
+Stores one row per canonical `LimenDecisionResult`, linked to `runs(id)` with cascade delete. `(run_id, decision_id)` is unique. Repository and Telegraph evidence remain source-separated JSONB values. Historical backfills may explicitly represent unknown per-decision evaluation time as `evaluatedAt: null`; live Action-generated decisions must include it.
 
 ### `telegraph_requests`
 
-Stores one row per actual unique Telegraph request: CVE, `CVE_LOOKUP`, Miner provenance, cost, duration, network, payment scheme, request/response timestamps, outcome and optional settlement reference. `(run_id, cve_id)` is unique for V1 because the Action deduplicates one paid lookup per CVE within a run.
+Stores one row per actual unique Telegraph request: CVE, `CVE_LOOKUP`, Miner provenance, cost, duration, network, payment scheme, request/response timestamps, outcome and optional settlement reference. `requestedAt` is required for `source=action` records. Historical `source=backfill` records may use `null` when the original per-request time was not preserved; no timestamp is inferred from run timing. `(run_id, cve_id)` is unique for V1 because the Action deduplicates one paid lookup per CVE within a run.
 
 No table has columns for private keys, wallet credentials, GitHub tokens, authorization headers, `PAYMENT-SIGNATURE`, or raw reusable payment proof.
 
@@ -81,7 +81,7 @@ interface LedgerRunIngest {
 }
 ```
 
-The runtime validator uses strict Zod schemas and rejects malformed repositories, SHAs, decisions, reason codes, timestamps, CVE IDs, counts, costs, usage classes and Telegraph records. It also checks that aggregate counts, policy versions, decision IDs, Telegraph CVE records and `isTest` agree with the package.
+The runtime validator uses strict Zod schemas and rejects malformed repositories, SHAs, decisions, reason codes, timestamps, CVE IDs, counts, costs, usage classes and Telegraph records. It also checks that aggregate counts, policy versions, decision IDs, Telegraph CVE records and `isTest` agree with the package. Action request records must include `requestedAt`, and Action decisions must include `evaluatedAt`; backfill records may explicitly preserve either unknown time as `null`.
 
 Forbidden credential-like keys are rejected recursively, including `privateKey`, `private_key`, `seed`, `mnemonic`, `paymentSignature`, `paymentProof`, `authorization`, `githubToken`, `token`, and service-role key variants. Safe string redaction still runs before storage so header-like values inside a permitted raw provider string are not retained.
 
@@ -133,7 +133,7 @@ The release decision is calculated first and remains authoritative. Ledger persi
 
 ## Telegraph Provenance
 
-The Action derives `SafeTelegraphRequestRecord` from the existing normalized `TelegraphCveEvidence`. It retains Intent, Miner ID/name, cost, duration, network, scheme and timestamps. The current Telegraph client does not expose a safe settlement transaction reference in its public evidence contract, so `settlementReference` remains `null`; P5 does not redesign x402 internals to force this field.
+The Action derives `SafeTelegraphRequestRecord` from the existing normalized `TelegraphCveEvidence`. It retains Intent, Miner ID/name, cost, duration, network, scheme and timestamps. The current Telegraph client does not expose a safe settlement transaction reference in its public evidence contract, so `settlementReference` remains `null`; P5 does not redesign x402 internals to force this field. Historical sanitized backfills may explicitly represent unknown Telegraph request timing as `null` in both the request record and canonical decision evidence. Current Action-generated evidence must include request timing and does not replace unknown values with run start or completion times.
 
 The canonical Telegraph `raw` field crosses the validation boundary only after existing redaction, but the Postgres repository/function replace it with `null` before storage. P5 retains normalized Telegraph evidence, not a raw provider-response archive; forbidden credential-bearing fields are rejected before persistence.
 
@@ -153,6 +153,33 @@ The accepted live proof remains external to the ledger implementation:
 - PASS: `https://github.com/kaelah971/limen-demo/actions/runs/33655468552`
 
 P5 does not claim those historical runs were automatically persisted live.
+
+## P5.1 Live Validation
+
+Manual validation against the hosted Supabase project named Limen confirmed
+that all three migrations are applied and Local = Remote, including the two
+additive nullable-timestamp migrations. Authenticated API validation confirmed
+missing-token `401`, wrong-token `401`, and valid-token invalid-payload `400`
+behavior. Sanitized demo/backfill HOLD and PASS records persisted and were
+retrieved by their stable `LM-RUN-*` IDs.
+
+The HOLD record round trip preserved five decisions, five Telegraph request
+records, `$0.05` total cost, and Miner provenance. The PASS record preserved
+zero decisions, zero Telegraph request records, and zero cost. Exact duplicate
+HOLD ingest returned the existing ID with `created=false`. A same-execution
+payload conflict returned `409 LEDGER_IDEMPOTENCY_CONFLICT`, and the stored
+HOLD record remained unchanged.
+
+A synthetic prohibited `privateKey` field was rejected with `400` and created
+no row. Hosted inspection confirmed RLS enabled on all three tables and no
+rows in `pg_policies`, so no anonymous/public policies or anonymous INSERT
+policy exist. All imported records are explicitly `usageClass=demo`,
+`source=backfill`, and `isTest=true`; they are not organic external adoption.
+
+Historical R0 request `requestedAt` and per-decision `evaluatedAt` values that
+were not preserved remain explicitly `null`. Current Action-generated records
+must still include request timing and decision evaluation timing. No historical
+timestamps were fabricated or inferred.
 
 ## Local Setup
 

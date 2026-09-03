@@ -73,7 +73,7 @@ export const SafeTelegraphRequestRecordSchema = z
     durationMs: NonNegativeIntegerSchema.nullable(),
     network: z.string().max(128).nullable(),
     paymentScheme: z.string().max(128).nullable(),
-    requestedAt: TimestampSchema,
+    requestedAt: TimestampSchema.nullable(),
     receivedAt: TimestampSchema.nullable(),
     outcome: z.enum(["success", "failed"]),
     settlementReference: z.string().max(255).nullable(),

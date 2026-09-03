@@ -83,6 +83,12 @@ function createInput(
 }
 
 describe("evaluateLimenDecision", () => {
+  it("emits a non-null evaluation timestamp for live evaluator output", () => {
+    const result = evaluateLimenDecision(createInput());
+
+    expect(result.evaluatedAt).toBe("2026-09-02T10:01:00.000Z");
+  });
+
   it.each([
     {
       name: "clear vulnerable runtime release",

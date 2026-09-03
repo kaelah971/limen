@@ -106,6 +106,22 @@ function assertRunConsistency(input: LedgerRunIngest): void {
     if (decision.cveId !== decision.repositoryEvidence.cveId) {
       throw new LedgerValidationError("Decision CVE identity must match repository evidence.");
     }
+
+    if (run.source === "action" && decision.evaluatedAt === null) {
+      throw new LedgerValidationError(
+        "Action decisions must include evaluatedAt.",
+      );
+    }
+
+    if (
+      run.source === "action" &&
+      decision.telegraphEvidence !== null &&
+      decision.telegraphEvidence.requestedAt === null
+    ) {
+      throw new LedgerValidationError(
+        "Action decision Telegraph evidence must include requestedAt.",
+      );
+    }
   }
 
   const requestCves = new Set<string>();
@@ -114,6 +130,12 @@ function assertRunConsistency(input: LedgerRunIngest): void {
       throw new LedgerValidationError("Telegraph CVE request records must be unique within a run.");
     }
     requestCves.add(request.cveId);
+
+    if (run.source === "action" && request.requestedAt === null) {
+      throw new LedgerValidationError(
+        "Action Telegraph request records must include requestedAt.",
+      );
+    }
   }
 }
 

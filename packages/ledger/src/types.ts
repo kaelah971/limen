@@ -49,7 +49,7 @@ export interface SafeTelegraphRequestRecord {
   durationMs: number | null;
   network: string | null;
   paymentScheme: string | null;
-  requestedAt: string;
+  requestedAt: string | null;
   receivedAt: string | null;
   outcome: "success" | "failed";
   settlementReference: string | null;
