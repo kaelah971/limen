@@ -60,6 +60,22 @@ export {
 export { redactSecrets, redactString } from "./observability/redact";
 
 export {
+  createObservabilityLogger,
+  LimenObservabilityEventSchema,
+  LimenObservabilityStageSchema,
+  observabilityErrorFields,
+  sanitizeObservabilityEvent,
+  serializeObservabilityEvent,
+  startObservabilityStage,
+  type LimenCorrelationContext,
+  type LimenObservabilityEvent,
+  type LimenObservabilityLogger,
+  type LimenObservabilitySink,
+  type LimenObservabilityStage,
+  type ObservabilityStageHandle,
+} from "./observability/events";
+
+export {
   loadLimenPolicy,
   parseLimenPolicy,
   type LimenPolicySource,

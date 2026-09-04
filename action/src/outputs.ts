@@ -23,7 +23,9 @@ export function setActionOutputs(
     "evaluated-cves": JSON.stringify(result.evaluatedCves),
     "skipped-cves": JSON.stringify(result.skippedCves),
     "telegraph-request-count": String(result.telegraphRequestCount),
-    "telegraph-cost-usd": result.telegraphCostUsd.toFixed(6),
+    "telegraph-cost-usd": result.telegraphCostKnown === false
+      ? ""
+      : result.telegraphCostUsd.toFixed(6),
     reason: result.runReasonCode,
     "ledger-run-id": result.ledgerRunId ?? "",
     "ledger-persisted": result.ledgerPersisted === true ? "true" : "false",

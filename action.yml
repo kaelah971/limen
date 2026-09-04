@@ -50,7 +50,7 @@ outputs:
   telegraph-request-count:
     description: Number of paid Telegraph lookup attempts made in this run.
   telegraph-cost-usd:
-    description: Sum of reported Telegraph lookup costs in USD.
+    description: Sum of reported Telegraph lookup costs in USD; blank when cost is unknown.
   reason:
     description: Run-level reason code.
   ledger-run-id:

@@ -1,5 +1,8 @@
 import { redactString } from "../../packages/core/src";
-import type { LimenDecisionResult } from "../../packages/core/src";
+import type {
+  LimenDecisionResult,
+  LimenObservabilityEvent,
+} from "../../packages/core/src";
 import type { LimenRunResult } from "./types";
 
 function safe(value: unknown): string {
@@ -23,7 +26,54 @@ function formatCost(value: number | null): string {
   return value === null ? "not reported" : `$${value.toFixed(6)}`;
 }
 
-export function renderSummary(result: LimenRunResult): string {
+function shortSha(value: string): string {
+  return value.slice(0, 12);
+}
+
+function stageSummary(events: readonly LimenObservabilityEvent[]): string {
+  const terminal = new Map<string, LimenObservabilityEvent>();
+  for (const event of events) {
+    if (event.event === "START") {
+      continue;
+    }
+    if (event.event === "FAILURE" && event.outcome === "retrying") {
+      continue;
+    }
+    terminal.set(event.stage, event);
+  }
+
+  const rows = [...terminal.values()].map((event) => {
+    const retry = event.retryCount === undefined ? "-" : String(event.retryCount);
+    const duration = event.durationMs === undefined ? "-" : `${event.durationMs} ms`;
+    const status = event.event === "SUCCESS" ? "SUCCESS" : "FAILURE";
+    return `| ${safe(event.stage)} | ${status} | ${duration} | ${retry} |`;
+  });
+  return rows.length === 0
+    ? "No completed stage telemetry was recorded."
+    : [
+        "| Stage | Status | Duration | Retries |",
+        "| --- | --- | --- | --- |",
+        ...rows,
+      ].join("\n");
+}
+
+function clientDuration(
+  events: readonly LimenObservabilityEvent[],
+  cve: string,
+): string | null {
+  const event = [...events].reverse().find((candidate) =>
+    candidate.stage === "telegraph-cve-lookup" &&
+    candidate.cve === cve &&
+    candidate.event !== "START" &&
+    candidate.outcome !== "retrying",
+  );
+  return event?.durationMs === undefined ? null : `${event.durationMs} ms`;
+}
+
+export function renderSummary(
+  result: LimenRunResult,
+  events: readonly LimenObservabilityEvent[] = [],
+): string {
   const decisionRows = result.decisions.length === 0
     ? "No per-CVE decisions were generated."
     : [
@@ -57,7 +107,8 @@ export function renderSummary(result: LimenRunResult): string {
           const availability = decision.checks.find((check) => check.id === "telegraph-availability");
           return `- ${safe(decision.cveId)}: unavailable (${safe(availability?.evidence ?? "no evidence")}).`;
         }
-        return `- ${safe(decision.cveId)}: Intent **CVE_LOOKUP**, Miner ${safe(evidence.minerName ?? evidence.minerId ?? "not reported")}, cost ${formatCost(evidence.costUsd)}, latency ${safe(evidence.durationMs === null ? "not reported" : `${evidence.durationMs} ms`)}.`;
+        const localDuration = clientDuration(events, decision.cveId);
+        return `- ${safe(decision.cveId)}: Intent **CVE_LOOKUP**, Miner ${safe(evidence.minerName ?? evidence.minerId ?? "not reported")}, cost ${formatCost(evidence.costUsd)}, provider latency ${safe(evidence.durationMs === null ? "not reported" : `${evidence.durationMs} ms`)}${localDuration === null ? "" : `, client duration ${localDuration}`}.`;
       }).join("\n");
 
   const nextAction = result.overallDecision === "PASS"
@@ -72,11 +123,17 @@ ${safe(result.runSummary)}
 
 Repository: \`${safe(result.context.repository)}\`<br>
 PR: #${result.context.pullRequestNumber}<br>
+Limen run: \`${safe(result.runId)}\`<br>
+GitHub run: \`${safe(result.context.githubRunId)}\` / attempt \`${safe(result.context.githubRunAttempt)}\`<br>
 Policy: \`${safe(result.policyVersion)}\`<br>
-Base: \`${safe(result.baseSha)}\`<br>
-Head: \`${safe(result.headSha)}\`<br>
+Base: \`${safe(shortSha(result.baseSha))}\`<br>
+Head: \`${safe(shortSha(result.headSha))}\`<br>
 Event: \`${safe(result.context.eventName)}\`<br>
 Actor: \`${safe(result.context.actor)}\`
+
+## Execution
+
+${stageSummary(events)}
 
 ## Decisions
 
@@ -89,16 +146,18 @@ ${why}
 ## Telegraph
 
 Requests: \`${result.telegraphRequestCount}\`<br>
-Cost: \`$${result.telegraphCostUsd.toFixed(6)}\`
+Cost: \`${result.telegraphCostKnown === false ? "not fully reported" : `$${result.telegraphCostUsd.toFixed(6)}`}\`
 
 ${telegraph}
 
 ## Evidence ledger
 
 ${result.ledgerStatus === "recorded"
-  ? `Evidence ledger: recorded\nRun ID: \`${safe(result.ledgerRunId)}\``
+  ? `Evidence ledger: recorded\nRun ID: \`${safe(result.ledgerRunId)}\`\nDuration: \`${safe(result.ledgerPersistenceDurationMs)} ms\``
   : result.ledgerStatus === "failed"
-    ? "Evidence ledger: persistence failed"
+    ? `Evidence ledger: persistence failed\nError: \`${safe(result.ledgerErrorCode)}\`${result.ledgerHttpStatus === undefined ? "" : ` (HTTP ${result.ledgerHttpStatus})`}\nDuration: \`${safe(result.ledgerPersistenceDurationMs)} ms\``
+    : result.ledgerStatus === "partial"
+      ? "Evidence ledger: partial configuration; persistence skipped"
     : "Evidence ledger: not configured"}
 
 ## State

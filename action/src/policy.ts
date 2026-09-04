@@ -2,6 +2,9 @@ import {
   isLimenError,
   LimenPolicyNotFoundError,
   parseLimenPolicy,
+  startObservabilityStage,
+  type LimenCorrelationContext,
+  type LimenObservabilityLogger,
 } from "../../packages/core/src";
 import {
   GitHubResponseError,
@@ -28,27 +31,58 @@ function decodePolicyContent(content: string, path: string): string {
 export async function loadBaseCommitPolicy(
   githubClient: GitHubClient,
   context: ActionPullRequestContext,
+  observability?: {
+    logger: LimenObservabilityLogger;
+    correlation: LimenCorrelationContext;
+    now: () => Date;
+  },
 ) {
-  for (const path of ["limen.yml", "limen.yaml"] as const) {
-    try {
-      const response = await githubClient.getRepositoryFile({
-        owner: context.owner,
-        repo: context.repo,
-        path,
-        ref: context.baseSha,
-      });
-      const source = decodePolicyContent(response.data.content, path);
-      return parseLimenPolicy(source, `${path}@${context.baseSha}`);
-    } catch (error) {
-      if (isNotFound(error)) {
-        continue;
-      }
-      throw error;
-    }
-  }
-
-  throw new LimenPolicyNotFoundError(
-    "No limen.yml or limen.yaml policy file was found at the pull request base commit.",
-    { baseSha: context.baseSha },
+  const retrievalStage = startObservabilityStage(
+    observability?.logger,
+    "policy-retrieval",
+    observability?.correlation ?? {},
+    observability?.now,
   );
+  try {
+    for (const path of ["limen.yml", "limen.yaml"] as const) {
+      try {
+        const response = await githubClient.getRepositoryFile({
+          owner: context.owner,
+          repo: context.repo,
+          path,
+          ref: context.baseSha,
+        });
+        const source = decodePolicyContent(response.data.content, path);
+        const parseStage = startObservabilityStage(
+          observability?.logger,
+          "policy-parse",
+          observability?.correlation ?? {},
+          observability?.now,
+          { policyVersion: undefined },
+        );
+        try {
+          const policy = parseLimenPolicy(source, `${path}@${context.baseSha}`);
+          parseStage.success({ policyVersion: policy.version });
+          retrievalStage.success({ policyVersion: policy.version });
+          return policy;
+        } catch (error) {
+          parseStage.failure(error);
+          throw error;
+        }
+      } catch (error) {
+        if (isNotFound(error)) {
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    throw new LimenPolicyNotFoundError(
+      "No limen.yml or limen.yaml policy file was found at the pull request base commit.",
+      { baseSha: context.baseSha },
+    );
+  } catch (error) {
+    retrievalStage.failure(error);
+    throw error;
+  }
 }

@@ -1,8 +1,8 @@
 const SENSITIVE_KEY =
-  /private[_ -]?key|seed|mnemonic|payment[_ -]?(?:signature|proof)|authorization|credential|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret/i;
+  /private[_ -]?key|seed|mnemonic|payment[_ -]?(?:signature|proof)|authorization|credential|github[_ -]?token|ledger[_ -]?token|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|service[_ -]?role(?:[_ -]?key)?|supabase[_ -]?service[_ -]?role(?:[_ -]?key)?/i;
 
 const SENSITIVE_ASSIGNMENT =
-  /(["']?(?:private[_ -]?key|seed(?: phrase)?|mnemonic|payment[_ -]?(?:signature|proof)|authorization|credential|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret)["']?\s*[:=]\s*)(["'][^"']*["']|[^,;}\s]+)/gi;
+  /(["']?(?:private[_ -]?key|seed(?: phrase)?|mnemonic|payment[_ -]?(?:signature|proof)|authorization|credential|github[_ -]?token|ledger[_ -]?token|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|service[_ -]?role(?:[_ -]?key)?|supabase[_ -]?service[_ -]?role(?:[_ -]?key)?)["']?\s*[:=]\s*)(["'][^"']*["']|[^,;}\s]+)/gi;
 
 const SENSITIVE_HEADER =
   /\b(PAYMENT-SIGNATURE|PAYMENT-PROOF|AUTHORIZATION)\b\s*[:=]?\s+([^\s,;]+)/gi;

@@ -12,10 +12,23 @@ import type {
 
 export class LedgerClientError extends Error {
   readonly code = "LEDGER_CLIENT_ERROR" as const;
+  readonly status?: number;
+  readonly responseCode?: string;
+  readonly reason?: "timeout" | "network";
 
-  constructor(message: string) {
+  constructor(
+    message: string,
+    options: {
+      status?: number;
+      responseCode?: string;
+      reason?: "timeout" | "network";
+    } = {},
+  ) {
     super(message);
     this.name = "LedgerClientError";
+    this.status = options.status;
+    this.responseCode = options.responseCode;
+    this.reason = options.reason;
   }
 }
 
@@ -36,6 +49,16 @@ async function readJson(response: Response): Promise<unknown> {
   } catch {
     return null;
   }
+}
+
+function responseCode(body: unknown): string | undefined {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return undefined;
+  }
+  const code = (body as Record<string, unknown>).code;
+  return typeof code === "string" && /^[A-Z][A-Z0-9_]{1,127}$/.test(code)
+    ? code
+    : undefined;
 }
 
 function endpointUrl(baseUrl: string, suffix: string): string {
@@ -116,6 +139,7 @@ export class LedgerIngestClient implements Pick<EvidenceLedger, "persistRun" | "
           response.status === 401
             ? "The evidence ledger rejected the ingest token."
             : "The evidence ledger request failed.",
+          { status: response.status, responseCode: responseCode(body) },
         );
       }
       return body;
@@ -123,7 +147,16 @@ export class LedgerIngestClient implements Pick<EvidenceLedger, "persistRun" | "
       if (error instanceof LedgerClientError) {
         throw error;
       }
-      throw new LedgerClientError("The evidence ledger could not be reached.");
+      throw new LedgerClientError(
+        error instanceof Error && error.name === "AbortError"
+          ? "The evidence ledger request timed out."
+          : "The evidence ledger could not be reached.",
+        {
+          reason: error instanceof Error && error.name === "AbortError"
+            ? "timeout"
+            : "network",
+        },
+      );
     } finally {
       clearTimeout(timeout);
     }

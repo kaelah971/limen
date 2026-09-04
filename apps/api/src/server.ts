@@ -1,5 +1,10 @@
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import {
+  createObservabilityLogger,
+  startObservabilityStage,
+  type LimenObservabilityLogger,
+} from "../../../packages/core/src";
 import {
   LedgerValidationError,
   isLedgerRunId,
@@ -35,6 +40,8 @@ export interface LedgerServerOptions {
   ingestToken: string;
   receipts?: EvidenceReceiptStore;
   maxBodyBytes?: number;
+  observability?: LimenObservabilityLogger;
+  requestIdFactory?: () => string;
 }
 
 class LedgerApiRequestError extends Error {
@@ -55,6 +62,32 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
   response.setHeader("content-type", "application/json; charset=utf-8");
   response.setHeader("cache-control", "no-store");
   response.end(serialized);
+}
+
+function routeTemplate(request: IncomingMessage): string {
+  try {
+    const path = requestPath(request);
+    if (path[0] !== "v1") {
+      return "unknown";
+    }
+    if (path[1] === "ledger" && path[2] === "runs") {
+      return path.length === 3 ? "/v1/ledger/runs" : "/v1/ledger/runs/:id";
+    }
+    if (path[1] === "receipts") {
+      if (path.length === 2) {
+        return "/v1/receipts";
+      }
+      if (path.length === 3) {
+        return "/v1/receipts/:id";
+      }
+      if (path.length === 4 && path[3] === "revoke") {
+        return "/v1/receipts/:id/revoke";
+      }
+    }
+    return "unknown";
+  } catch {
+    return "invalid-path";
+  }
 }
 
 function tokenMatches(actual: string | undefined, expected: string): boolean {
@@ -200,68 +233,106 @@ async function revokeReceipt(
   return options.receipts.revokeReceipt(id);
 }
 
+interface ApiErrorResponse {
+  status: number;
+  code: string;
+  message: string;
+}
+
+function apiErrorResponse(error: unknown): ApiErrorResponse {
+  if (error instanceof LedgerApiRequestError) {
+    return { status: error.status, code: error.code, message: error.message };
+  }
+  if (error instanceof LedgerValidationError) {
+    return { status: 400, code: error.code, message: error.message };
+  }
+  if (error instanceof LedgerConflictError) {
+    return { status: 409, code: error.code, message: error.message };
+  }
+  if (error instanceof LedgerPersistenceError) {
+    return {
+      status: 500,
+      code: error.code,
+      message: "The evidence ledger is temporarily unavailable.",
+    };
+  }
+  if (error instanceof ReceiptConflictError) {
+    return { status: 409, code: error.code, message: error.message };
+  }
+  if (error instanceof ReceiptRevokedError) {
+    return { status: 409, code: error.code, message: error.message };
+  }
+  if (error instanceof ReceiptNotFoundError) {
+    return { status: 404, code: error.code, message: "The receipt was not found." };
+  }
+  if (error instanceof ReceiptPersistenceError) {
+    return {
+      status: 500,
+      code: error.code,
+      message: "The evidence receipt service is temporarily unavailable.",
+    };
+  }
+  return {
+    status: 500,
+    code: "LEDGER_INTERNAL_ERROR",
+    message: "The evidence ledger request failed.",
+  };
+}
+
 async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
   options: LedgerServerOptions,
 ): Promise<void> {
+  const requestId = options.requestIdFactory?.() ?? `LM-REQ-${randomUUID()}`;
+  const route = routeTemplate(request);
+  response.setHeader("x-request-id", requestId);
+  const requestStage = startObservabilityStage(
+    options.observability,
+    "api-request",
+    {},
+    () => new Date(),
+    {
+      requestId,
+      ...(request.method === undefined ? {} : { method: request.method }),
+      route,
+    },
+  );
   try {
     const path = requestPath(request);
     if (request.method === "POST" && path.length === 3 && path[0] === "v1" && path[1] === "ledger" && path[2] === "runs") {
       sendJson(response, 200, await persistRun(request, options));
+      requestStage.success({ httpStatus: 200 });
       return;
     }
     if (request.method === "GET" && path.length === 4 && path[0] === "v1" && path[1] === "ledger" && path[2] === "runs") {
       sendJson(response, 200, await retrieveRun(request, options, path[3] ?? ""));
+      requestStage.success({ httpStatus: 200 });
       return;
     }
     if (request.method === "POST" && path.length === 2 && path[0] === "v1" && path[1] === "receipts") {
       sendJson(response, 200, await publishReceipt(request, options));
+      requestStage.success({ httpStatus: 200 });
       return;
     }
     if (request.method === "GET" && path.length === 3 && path[0] === "v1" && path[1] === "receipts") {
       sendJson(response, 200, await retrieveReceipt(options, path[2] ?? ""));
+      requestStage.success({ httpStatus: 200 });
       return;
     }
     if (request.method === "POST" && path.length === 4 && path[0] === "v1" && path[1] === "receipts" && path[3] === "revoke") {
       sendJson(response, 200, await revokeReceipt(request, options, path[2] ?? ""));
+      requestStage.success({ httpStatus: 200 });
       return;
     }
     throw new LedgerApiRequestError(404, "LEDGER_ROUTE_NOT_FOUND", "Ledger route was not found.");
   } catch (error) {
-    if (error instanceof LedgerApiRequestError) {
-      sendJson(response, error.status, { code: error.code, message: error.message });
-      return;
-    }
-    if (error instanceof LedgerValidationError) {
-      sendJson(response, 400, { code: error.code, message: error.message });
-      return;
-    }
-    if (error instanceof LedgerConflictError) {
-      sendJson(response, 409, { code: error.code, message: error.message });
-      return;
-    }
-    if (error instanceof LedgerPersistenceError) {
-      sendJson(response, 500, { code: error.code, message: "The evidence ledger is temporarily unavailable." });
-      return;
-    }
-    if (error instanceof ReceiptConflictError) {
-      sendJson(response, 409, { code: error.code, message: error.message });
-      return;
-    }
-    if (error instanceof ReceiptRevokedError) {
-      sendJson(response, 409, { code: error.code, message: error.message });
-      return;
-    }
-    if (error instanceof ReceiptNotFoundError) {
-      sendJson(response, 404, { code: error.code, message: "The receipt was not found." });
-      return;
-    }
-    if (error instanceof ReceiptPersistenceError) {
-      sendJson(response, 500, { code: error.code, message: "The evidence receipt service is temporarily unavailable." });
-      return;
-    }
-    sendJson(response, 500, { code: "LEDGER_INTERNAL_ERROR", message: "The evidence ledger request failed." });
+    const mapped = apiErrorResponse(error);
+    sendJson(response, mapped.status, { code: mapped.code, message: mapped.message });
+    requestStage.failure(undefined, {
+      httpStatus: mapped.status,
+      errorCode: mapped.code,
+    });
   }
 }
 
@@ -269,7 +340,15 @@ export function createLedgerServer(options: LedgerServerOptions): Server {
   if (options.ingestToken.trim() === "") {
     throw new Error("A ledger ingest token is required to create the server.");
   }
+  const resolvedOptions: LedgerServerOptions = {
+    ...options,
+    observability: options.observability ?? createObservabilityLogger({
+      info: (message) => console.log(message),
+      warning: (message) => console.warn(message),
+      error: (message) => console.error(message),
+    }),
+  };
   return createServer((request, response) => {
-    void handleRequest(request, response, options);
+    void handleRequest(request, response, resolvedOptions);
   });
 }

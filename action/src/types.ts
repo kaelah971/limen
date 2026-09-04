@@ -4,6 +4,7 @@ import type {
 import type {
   LimenDecisionResult,
   LimenPolicy,
+  LimenObservabilityLogger,
 } from "../../packages/core/src";
 import type { TelegraphClient } from "../../packages/telegraph/src";
 import type {
@@ -45,6 +46,7 @@ export interface LimenRunResult {
   skippedCves: string[];
   telegraphRequestCount: number;
   telegraphCostUsd: number;
+  telegraphCostKnown?: boolean;
   telegraphRequests: SafeTelegraphRequestRecord[];
   baseSha: string;
   headSha: string;
@@ -60,7 +62,10 @@ export interface LimenRunResult {
   completedAt: string;
   ledgerRunId?: string;
   ledgerPersisted?: boolean;
-  ledgerStatus?: "not-configured" | "recorded" | "failed";
+  ledgerStatus?: "not-configured" | "partial" | "recorded" | "failed";
+  ledgerPersistenceDurationMs?: number;
+  ledgerErrorCode?: string;
+  ledgerHttpStatus?: number;
 }
 
 export interface OrchestrationDependencies {
@@ -69,6 +74,7 @@ export interface OrchestrationDependencies {
   sleep?: (milliseconds: number) => Promise<void>;
   now?: () => Date;
   createRunId?: () => string;
+  observability?: LimenObservabilityLogger;
 }
 
 export interface OrchestrateLimenRunInput {
