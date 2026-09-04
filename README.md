@@ -20,14 +20,16 @@ jobs:
   limen:
     runs-on: ubuntu-latest
     steps:
-      - uses: <owner>/limen@<PINNED_REF>
+      - uses: kaelah971/limen@8688a0ec967e6e2bbc10d1464456acedc96cfe6b
         with:
           github-token: ${{ github.token }}
           telegraph-private-key: ${{ secrets.LIMEN_TELEGRAPH_PRIVATE_KEY }}
           telegraph-engine-url: ${{ vars.TELEGRAPH_ENGINE_URL }}
 ```
 
-See [`Docs/github-action.md`](Docs/github-action.md) for installation, inputs, outputs, fork behavior, and hardened `pull_request_target` guidance. A complete placeholder workflow is at [`examples/github-actions/limen.yml`](examples/github-actions/limen.yml).
+Use the current immutable Action reference `kaelah971/limen@8688a0ec967e6e2bbc10d1464456acedc96cfe6b`. Set the `TELEGRAPH_ENGINE_URL` GitHub Variable to `http://13.237.89.59:7044/engine/v1/ask` for the currently validated Telegraph testnet Engine route. This endpoint is current setup infrastructure, not permanent production infrastructure.
+
+See [`Docs/github-action.md`](Docs/github-action.md) for installation, inputs, outputs, fork behavior, and hardened `pull_request_target` guidance. A complete workflow is at [`examples/github-actions/limen.yml`](examples/github-actions/limen.yml). The public onboarding page is available at `/setup`.
 
 ## Policy
 
@@ -66,4 +68,4 @@ npm run build
 npm run build:action
 ```
 
-The bundled Action entrypoint is `action/dist/index.js` and is declared by `action.yml`. P3 intentionally adds no persistence, evidence receipts, web UI, authentication, billing, GitHub App installation, or custom Checks API integration.
+The bundled Action entrypoint is `action/dist/index.js` and is declared by `action.yml`. Optional P5 evidence persistence remains a separate server-side ledger path, and P6 receipt publication is not automatic from the Action. Limen has no authentication, billing, GitHub App installation, or custom Checks API integration.

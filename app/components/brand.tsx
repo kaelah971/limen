@@ -17,6 +17,9 @@ function NavigationLinks({ mobile = false }: { mobile?: boolean }) {
       <Link className="nav-link" href="/#how-it-works">
         How it works
       </Link>
+      <Link className="nav-link" href="/setup">
+        Setup
+      </Link>
       <Link className="nav-link" href="/proof">
         Proof
       </Link>

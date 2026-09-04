@@ -30,6 +30,14 @@ import {
   type LimenEvidenceReceipt,
   type ReceiptSnapshot,
 } from "../packages/receipts/src";
+import {
+  CURRENT_ACTION_REFERENCE,
+  CURRENT_TELEGRAPH_ENGINE_URL,
+  CURRENT_TELEGRAPH_NETWORK,
+  CURRENT_WORKFLOW,
+  MINIMAL_POLICY,
+  RECOMMENDED_POLICY,
+} from "../app/lib/setup-contract";
 
 const HOLD_SNAPSHOT: ReceiptSnapshot = {
   schemaVersion: RECEIPT_SCHEMA_VERSION,
@@ -309,6 +317,7 @@ describe("P7 route and accessibility boundaries", () => {
     expect(home).toContain('href="/demo"');
     expect(home).toContain("ACTIVE_HOLD_RECEIPT_ID");
     expect(brand).toContain('href="/proof"');
+    expect(brand).toContain('href="/setup"');
     expect(brand).toContain('rel="noreferrer noopener"');
     expect(demo).toContain("DEMO_PULL_REQUEST_URL");
     expect(demo).toContain("ACTIVE_HOLD_RECEIPT_ID");
@@ -318,6 +327,46 @@ describe("P7 route and accessibility boundaries", () => {
     expect(receipt).toContain("githubPullRequestUrl");
     expect(evidence).toContain('import Link from "next/link"');
     expect(evidence).toContain("/^https?:\\/\\//i.test(href)");
+  });
+
+  it("keeps the public setup contract canonical and secret-safe", async () => {
+    const [setupPage, setupStyles, readme, actionDocs, exampleWorkflow] = await Promise.all([
+      readFile("app/setup/page.tsx", "utf8"),
+      readFile("app/globals.css", "utf8"),
+      readFile("README.md", "utf8"),
+      readFile("Docs/github-action.md", "utf8"),
+      readFile("examples/github-actions/limen.yml", "utf8"),
+    ]);
+    const docs = `${readme}\n${actionDocs}\n${exampleWorkflow}`;
+
+    expect(CURRENT_ACTION_REFERENCE).toBe("kaelah971/limen@8688a0ec967e6e2bbc10d1464456acedc96cfe6b");
+    expect(CURRENT_TELEGRAPH_ENGINE_URL).toBe("http://13.237.89.59:7044/engine/v1/ask");
+    expect(CURRENT_TELEGRAPH_NETWORK).toBe("eip155:84532");
+    expect(CURRENT_WORKFLOW).toContain("pull_request:");
+    expect(CURRENT_WORKFLOW).toContain("contents: read");
+    expect(CURRENT_WORKFLOW).toContain(`uses: ${CURRENT_ACTION_REFERENCE}`);
+    expect(CURRENT_WORKFLOW).toContain("github-token: ${{ github.token }}");
+    expect(CURRENT_WORKFLOW).toContain("telegraph-private-key: ${{ secrets.LIMEN_TELEGRAPH_PRIVATE_KEY }}");
+    expect(CURRENT_WORKFLOW).toContain("telegraph-engine-url: ${{ vars.TELEGRAPH_ENGINE_URL }}");
+    expect(RECOMMENDED_POLICY).toContain("missing_external_evidence: review");
+    expect(MINIMAL_POLICY).toContain("block_severity:");
+
+    expect(setupPage).toContain('export const metadata = getPageMetadata(');
+    expect(setupPage).toContain("SetupCodeBlock");
+    expect(setupPage).toContain("PASS");
+    expect(setupPage).toContain("HOLD");
+    expect(setupPage).toContain("REVIEW");
+    expect(setupPage).toContain("setup failure is not");
+    expect(setupPage).not.toContain("SUPABASE_SERVICE_ROLE_KEY");
+    expect(setupPage).not.toContain("LIMEN_INGEST_TOKEN");
+    expect(setupPage).not.toContain("PAYMENT-SIGNATURE");
+    expect(setupStyles).toContain(".setup-step-nav");
+    expect(setupStyles).toContain(".setup-code-block");
+    expect(setupStyles).toContain("@media (max-width: 760px)");
+    expect(docs).toContain(CURRENT_ACTION_REFERENCE);
+    expect(docs).toContain(CURRENT_TELEGRAPH_ENGINE_URL);
+    expect(docs).not.toContain("<owner>");
+    expect(docs).not.toContain("<PINNED_REF>");
   });
 
   it("defines page metadata and uses the existing Limen logo", () => {
@@ -334,6 +383,10 @@ describe("P7 route and accessibility boundaries", () => {
     expect(proofMetadata.alternates).toEqual({ canonical: "/proof" });
     expect(proofMetadata.openGraph).toMatchObject({ title: "Inspect proof | Limen", url: "/proof" });
     expect(proofMetadata.twitter).toMatchObject({ title: "Inspect proof | Limen" });
+
+    const setupMetadata = getPageMetadata("Set up Limen", "Setup description", "/setup");
+    expect(setupMetadata.alternates).toEqual({ canonical: "/setup" });
+    expect(setupMetadata.openGraph).toMatchObject({ title: "Set up Limen | Limen", url: "/setup" });
   });
 
   it("defines the responsive evidence path and reduced-motion behavior", async () => {

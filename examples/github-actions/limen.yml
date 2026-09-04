@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Evaluate release evidence
-        uses: <owner>/limen@<PINNED_REF>
+        uses: kaelah971/limen@8688a0ec967e6e2bbc10d1464456acedc96cfe6b
         with:
           github-token: ${{ github.token }}
           telegraph-private-key: ${{ secrets.LIMEN_TELEGRAPH_PRIVATE_KEY }}

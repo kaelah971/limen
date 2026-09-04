@@ -6,7 +6,7 @@ It does not checkout the pull request, install dependencies, run repository scri
 
 ## Installation
 
-Add a root `limen.yml` policy to the repository's trusted default branch. Then add the workflow from `examples/github-actions/limen.yml`, replacing `<owner>/limen@<PINNED_REF>` with a reviewed immutable Limen commit or tag.
+Add a root `limen.yml` policy to the repository's trusted default branch. Then add the workflow from `examples/github-actions/limen.yml` using the current immutable Limen commit `kaelah971/limen@8688a0ec967e6e2bbc10d1464456acedc96cfe6b`. No current Limen tag, release, or Marketplace flow exists.
 
 The workflow needs only:
 
@@ -34,14 +34,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Evaluate release evidence
-        uses: <owner>/limen@<PINNED_REF>
+        uses: kaelah971/limen@8688a0ec967e6e2bbc10d1464456acedc96cfe6b
         with:
           github-token: ${{ github.token }}
           telegraph-private-key: ${{ secrets.LIMEN_TELEGRAPH_PRIVATE_KEY }}
           telegraph-engine-url: ${{ vars.TELEGRAPH_ENGINE_URL }}
 ```
 
-There is deliberately no checkout step. `telegraph-engine-url` may instead be provided through the existing `TELEGRAPH_ENGINE_URL` environment configuration. The Action uses Base Sepolia by default through `expected-network` and the existing Telegraph configuration path.
+There is deliberately no checkout step. Set the GitHub Variable `TELEGRAPH_ENGINE_URL` to `http://13.237.89.59:7044/engine/v1/ask` for the currently validated Telegraph testnet Engine route. This endpoint is current setup infrastructure, not permanent production infrastructure. `telegraph-engine-url` may instead be provided through the existing `TELEGRAPH_ENGINE_URL` environment configuration. The Action uses Base Sepolia (`eip155:84532`) by default through `expected-network` and the existing Telegraph configuration path.
 
 ## Inputs
 
@@ -143,7 +143,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: limen-paid
     steps:
-      - uses: <owner>/limen@<PINNED_REF>
+      - uses: kaelah971/limen@8688a0ec967e6e2bbc10d1464456acedc96cfe6b
         with:
           github-token: ${{ github.token }}
           telegraph-private-key: ${{ secrets.LIMEN_TELEGRAPH_PRIVATE_KEY }}
@@ -160,4 +160,4 @@ The Action is bundled with:
 npm run build:action
 ```
 
-This generates `action/dist/index.js`, the entrypoint declared in `action.yml`. Consumers do not run `npm install` or build the Action inside their repositories. P3 does not include public receipts, the web app, user authentication, billing, GitHub App installation, custom Checks API calls, or Judge Mode. P5's optional persistence remains a separate backend service.
+This generates `action/dist/index.js`, the entrypoint declared in `action.yml`. Consumers do not run `npm install` or build the Action inside their repositories. P3 does not include public receipts, the web app, user authentication, billing, GitHub App installation, custom Checks API calls, or Judge Mode. P5's optional persistence remains a separate backend service, and P6 receipt publication is not automatic from the Action.
