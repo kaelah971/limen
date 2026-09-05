@@ -6,7 +6,7 @@ It does not checkout the pull request, install dependencies, run repository scri
 
 ## Installation
 
-Add a root `limen.yml` policy to the repository's trusted default branch. Then add the workflow from `examples/github-actions/limen.yml` using the current immutable Limen commit `kaelah971/limen@8688a0ec967e6e2bbc10d1464456acedc96cfe6b`. No current Limen tag, release, or Marketplace flow exists.
+Add a root `limen.yml` policy to the repository's trusted default branch. Then add the workflow from `examples/github-actions/limen.yml` using the current immutable Limen commit `kaelah971/limen@a91d36bfe8eaab5d95f791e39449878239bf948d`. No current Limen tag, release, or Marketplace flow exists.
 
 The workflow needs only:
 
@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Evaluate release evidence
-        uses: kaelah971/limen@8688a0ec967e6e2bbc10d1464456acedc96cfe6b
+        uses: kaelah971/limen@a91d36bfe8eaab5d95f791e39449878239bf948d
         with:
           github-token: ${{ github.token }}
           telegraph-private-key: ${{ secrets.LIMEN_TELEGRAPH_PRIVATE_KEY }}

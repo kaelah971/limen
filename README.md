@@ -20,14 +20,14 @@ jobs:
   limen:
     runs-on: ubuntu-latest
     steps:
-      - uses: kaelah971/limen@8688a0ec967e6e2bbc10d1464456acedc96cfe6b
+      - uses: kaelah971/limen@a91d36bfe8eaab5d95f791e39449878239bf948d
         with:
           github-token: ${{ github.token }}
           telegraph-private-key: ${{ secrets.LIMEN_TELEGRAPH_PRIVATE_KEY }}
           telegraph-engine-url: ${{ vars.TELEGRAPH_ENGINE_URL }}
 ```
 
-Use the current immutable Action reference `kaelah971/limen@8688a0ec967e6e2bbc10d1464456acedc96cfe6b`. Set the `TELEGRAPH_ENGINE_URL` GitHub Variable to `http://13.237.89.59:7044/engine/v1/ask` for the currently validated Telegraph testnet Engine route. This endpoint is current setup infrastructure, not permanent production infrastructure.
+Use the current immutable Action reference `kaelah971/limen@a91d36bfe8eaab5d95f791e39449878239bf948d`. Set the `TELEGRAPH_ENGINE_URL` GitHub Variable to `http://13.237.89.59:7044/engine/v1/ask` for the currently validated Telegraph testnet Engine route. This endpoint is current setup infrastructure, not permanent production infrastructure.
 
 See [`Docs/github-action.md`](Docs/github-action.md) for installation, inputs, outputs, fork behavior, and the supported `pull_request` contract. A complete workflow is at [`examples/github-actions/limen.yml`](examples/github-actions/limen.yml). The public onboarding page is available at `/setup`.
 

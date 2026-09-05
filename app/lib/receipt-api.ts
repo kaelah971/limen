@@ -17,7 +17,14 @@ const DEFAULT_PUBLIC_API_URL = "http://127.0.0.1:8787";
 export function getPublicReceiptApiUrl(
   environment: Record<string, string | undefined> = process.env,
 ): string {
-  return environment.LIMEN_PUBLIC_API_URL?.trim().replace(/\/+$/, "") || DEFAULT_PUBLIC_API_URL;
+  const configuredUrl = environment.LIMEN_PUBLIC_API_URL?.trim().replace(/\/+$/, "");
+  if (configuredUrl) {
+    return configuredUrl;
+  }
+  if (environment.NODE_ENV === "production") {
+    throw new Error("LIMEN_PUBLIC_API_URL is required in production.");
+  }
+  return DEFAULT_PUBLIC_API_URL;
 }
 
 export async function fetchPublicReceipt(

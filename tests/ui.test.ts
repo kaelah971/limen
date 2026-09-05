@@ -11,7 +11,7 @@ import {
   HOLD_SNAPSHOT_HASH,
   REVOKED_PASS_RECEIPT_ID,
 } from "../app/lib/demo-data";
-import { fetchPublicReceipt } from "../app/lib/receipt-api";
+import { fetchPublicReceipt, getPublicReceiptApiUrl } from "../app/lib/receipt-api";
 import { getPageMetadata, siteMetadata } from "../app/lib/metadata";
 import { validationMessage } from "../app/lib/receipt-validation";
 import {
@@ -163,6 +163,13 @@ function response(status: number, body: unknown): Response {
 }
 
 describe("public receipt API boundary", () => {
+  it("requires an explicit public API URL in production", () => {
+    expect(() => getPublicReceiptApiUrl({ NODE_ENV: "production" })).toThrow(
+      "LIMEN_PUBLIC_API_URL is required in production.",
+    );
+    expect(getPublicReceiptApiUrl({ NODE_ENV: "development" })).toBe("http://127.0.0.1:8787");
+  });
+
   it("validates and returns an active public HOLD receipt without adding auth", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response(200, HOLD_RECEIPT));
     await expect(fetchPublicReceipt(
@@ -339,7 +346,7 @@ describe("P7 route and accessibility boundaries", () => {
     ]);
     const docs = `${readme}\n${actionDocs}\n${exampleWorkflow}`;
 
-    expect(CURRENT_ACTION_REFERENCE).toBe("kaelah971/limen@8688a0ec967e6e2bbc10d1464456acedc96cfe6b");
+    expect(CURRENT_ACTION_REFERENCE).toBe("kaelah971/limen@a91d36bfe8eaab5d95f791e39449878239bf948d");
     expect(CURRENT_TELEGRAPH_ENGINE_URL).toBe("http://13.237.89.59:7044/engine/v1/ask");
     expect(CURRENT_TELEGRAPH_NETWORK).toBe("eip155:84532");
     expect(CURRENT_WORKFLOW).toContain("pull_request:");
