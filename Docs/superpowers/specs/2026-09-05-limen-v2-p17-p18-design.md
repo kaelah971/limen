@@ -179,8 +179,9 @@ Request the minimum repository permissions required for P18:
 - Metadata: Read
 - Contents: Read and Write
 - Pull Requests: Read and Write
+- Workflows: Read and Write — required only because the setup PR creates `.github/workflows/limen.yml`
 
-Do not request Actions: Read in P18 unless implementation proves it is strictly necessary.
+`Workflows: Write` is distinct from `Actions: Read`. Do not request Actions: Read in P18 unless implementation proves it is strictly necessary.
 
 Do not request repository administration, secrets access, deployments, issues, or unrelated permissions.
 
