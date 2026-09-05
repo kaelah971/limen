@@ -13,7 +13,7 @@ Limen is a release evidence gate that combines repository-specific GitHub depend
 | [Fresh Judge Mode HOLD](https://github.com/kaelah971/limen-demo/actions/runs/33958836557) | Vulnerable dependency path |
 | [Fresh Judge Mode PASS](https://github.com/kaelah971/limen-demo/actions/runs/33959096100) | Controlled patched path |
 | [Demo PR #1](https://github.com/kaelah971/limen-demo/pull/1) | The repository context behind both runs |
-| [Active public receipt](https://limen-mu.vercel.app/receipt/LM-REC-B1306724D0B84B6EBDDF7E36) | Historical sanitized HOLD projection |
+| [Historical public receipt](https://limen-mu.vercel.app/receipt/LM-REC-B1306724D0B84B6EBDDF7E36) | Historical sanitized HOLD projection |
 
 Current hardened Action reference:
 `kaelah971/limen@a91d36bfe8eaab5d95f791e39449878239bf948d`
@@ -85,7 +85,7 @@ The optional hosted ledger and public receipt path are separate from release aut
 - P5 live-validated server-owned persistence for sanitized `usageClass=demo` and `source=backfill` records.
 - P6 projects an allowlisted public snapshot and verifies its canonical SHA-256 hash.
 - Private ledger reads remain authenticated; public receipt reads expose only the sanitized projection.
-- The active historical HOLD receipt is [`LM-REC-B1306724D0B84B6EBDDF7E36`](https://limen-mu.vercel.app/receipt/LM-REC-B1306724D0B84B6EBDDF7E36).
+- The historical HOLD receipt is [`LM-REC-B1306724D0B84B6EBDDF7E36`](https://limen-mu.vercel.app/receipt/LM-REC-B1306724D0B84B6EBDDF7E36).
 - The PASS receipt was intentionally revoked during lifecycle validation and is not an active receipt.
 - A receipt hash is an integrity check, not a publisher signature, non-repudiation mechanism, or proof of universal safety.
 - P14 fresh Judge Mode did not automatically create receipts.
@@ -104,6 +104,18 @@ See [`Docs/evidence-receipts.md`](Docs/evidence-receipts.md), [`evidence/p5/READ
 - Structured observability and deterministic policy precedence make uncertainty visible.
 
 Deeper details are in [`Docs/security-model.md`](Docs/security-model.md) and [`Docs/architecture.md`](Docs/architecture.md).
+
+## Current Status
+
+Limen currently supports:
+
+- A read-only GitHub Action that evaluates repository evidence without checking out or executing pull request code.
+- Deterministic `PASS`, `HOLD`, and `REVIEW` decisions from trusted-base policy and repository-specific evidence.
+- A validated Telegraph testnet evidence path on Base Sepolia using the official x402 EVM payment flow.
+- Optional server-owned persistence and sanitized public receipt inspection.
+- Public setup, demo, proof, and architecture surfaces for inspection.
+
+The verified package contains two distinct evidence types: fresh P14 Judge Mode Action runs and historical hosted receipt evidence. They are not the same run. Limen does not claim external production adoption or human-user validation.
 
 ## Try It
 
@@ -157,6 +169,61 @@ The current Telegraph Engine URL is an explicit HTTP testnet exception documente
 - Receipt SHA-256 is integrity checking, not a digital signature or non-repudiation.
 - The current Telegraph HTTP Engine endpoint is an explicit testnet exception.
 - `PASS` does not mean universal repository security.
+
+## Post-Hackathon Roadmap
+
+The following capabilities are future product work. They are not part of the current Limen implementation or evidence package.
+
+### 1. GitHub App onboarding
+
+- Install Limen directly into repositories.
+- Provide guided configuration and installation health checks.
+- Manage Limen across multiple repositories from one installation.
+
+### 2. First-class GitHub release checks
+
+- Publish GitHub Check Runs for each evaluation.
+- Show `PASS`, `HOLD`, or `REVIEW` directly in pull requests with evidence summaries.
+- Support branch-protection integration without changing deterministic decision semantics.
+
+### 3. Broader repository evidence
+
+- Incorporate SBOMs, provenance, signatures, scanners, release artifacts, and CI/test evidence.
+- Preserve repository-specific context and source provenance for each evidence type.
+
+### 4. Evidence-provider expansion
+
+- Add additional independent evidence providers.
+- Preserve source separation rather than collapsing providers into one unqualified score.
+- Continue resolving material conflicts to `REVIEW` where appropriate.
+
+### 5. Remediation assistance
+
+- Provide upgrade guidance, patched ranges, and policy-aware remediation suggestions.
+- Keep generated remediation separate from deterministic release decisions.
+
+### 6. Persistent team workspace
+
+- Provide repository and decision history, evidence search, receipts, and audit trails.
+- Add team and organization boundaries for shared operation.
+
+### 7. Policy management
+
+- Offer policy templates and organization defaults.
+- Support repository overrides, policy history, and policy-change review.
+
+### 8. Agent and automation interfaces
+
+- Let agents and automation consume deterministic Limen decisions and evidence summaries.
+- Prevent agents from silently redefining repository policy or release thresholds.
+
+### 9. Production infrastructure
+
+- Move from the validated HTTP testnet route to an approved HTTPS Telegraph production route.
+- Establish production payment handling, multi-tenant isolation, and secret lifecycle controls.
+- Add monitoring, reconciliation, and explicit reliability targets.
+
+Long term, Limen becomes a release evidence control plane sitting between CI, security, and evidence signals and the decision to release.
 
 ## Verification
 
