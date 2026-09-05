@@ -1,3 +1,9 @@
+> 🎥 **DEMO VIDEO — TELEGRAPH HACKATHON TRACK 3**
+>
+> **[Watch the Limen demo on X →](https://x.com/_kaaelaa_/status/2096332395284758815?s=46)**
+>
+> See the complete release-evidence flow: GitHub repository context → paid Telegraph `CVE_LOOKUP` evidence → `limen.yml` policy → deterministic PASS / HOLD / REVIEW → public proof.
+
 # Limen
 
 Limen is a release evidence gate that combines repository-specific GitHub dependency facts, independently routed Telegraph CVE evidence, and deterministic repository policy to return `PASS`, `HOLD`, or `REVIEW` before a release proceeds.
@@ -263,4 +269,5 @@ See [`Docs/github-action.md`](Docs/github-action.md) for inputs, outputs, fork b
 - [Final proof index](evidence/README.md)
 - [Screenshot checklist](Docs/submission-screenshot-checklist.md)
 - [Demo script](Docs/submission-demo-script.md)
+- [Demo video](https://x.com/_kaaelaa_/status/2096332395284758815?s=46)
 - [Submission copy](Docs/submission-copy.md)
