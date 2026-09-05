@@ -251,8 +251,8 @@ describe("P7 receipt presentation semantics", () => {
 
   it("uses safe, inspectable GitHub links and validated demo constants", () => {
     expect(githubPullRequestUrl(HOLD_RECEIPT)).toBe(DEMO_PULL_REQUEST_URL);
-    expect(DEMO_HOLD_ACTION_URL).toContain("actions/runs/33654301781");
-    expect(DEMO_PASS_ACTION_URL).toContain("actions/runs/33655468552");
+    expect(DEMO_HOLD_ACTION_URL).toBe("https://github.com/kaelah971/limen-demo/actions/runs/33958836557");
+    expect(DEMO_PASS_ACTION_URL).toBe("https://github.com/kaelah971/limen-demo/actions/runs/33959096100");
     expect(HOLD_SNAPSHOT_HASH).toBe("41cbf844690a2a15bf6d7d0fdc6bfd8bf8ae08cd684d735eb611d069f3ffebdf");
     expect(JSON.stringify(HOLD_RECEIPT)).not.toContain("privateKey");
     expect(JSON.stringify(HOLD_RECEIPT)).not.toContain("minerId");
@@ -334,9 +334,12 @@ describe("P7 route and accessibility boundaries", () => {
     expect(brand).toContain('rel="noreferrer noopener"');
     expect(demo).toContain("DEMO_PULL_REQUEST_URL");
     expect(demo).toContain("ACTIVE_HOLD_RECEIPT_ID");
+    expect(demo).toContain("Inspect historical receipt");
     expect(demoTrace).toContain("DEMO_HOLD_ACTION_URL");
     expect(demoTrace).toContain("DEMO_PASS_ACTION_URL");
     expect(demoTrace).toContain("ACTIVE_HOLD_RECEIPT_ID");
+    expect(demoTrace).toContain("Historical public receipt");
+    expect(demoTrace).toContain("separate from the fresh P14 Judge Mode Action runs above");
     expect(demoTrace).toContain("Separately validated x402 Base Sepolia settlement");
     expect(demoTrace).not.toContain("Real x402 Base Sepolia settlement");
     expect(receipt).toContain("githubPullRequestUrl");
@@ -345,12 +348,13 @@ describe("P7 route and accessibility boundaries", () => {
   });
 
   it("keeps the public setup contract canonical and secret-safe", async () => {
-    const [setupPage, setupStyles, readme, actionDocs, exampleWorkflow] = await Promise.all([
+    const [setupPage, setupStyles, readme, actionDocs, exampleWorkflow, receiptLookup] = await Promise.all([
       readFile("app/setup/page.tsx", "utf8"),
       readFile("app/globals.css", "utf8"),
       readFile("README.md", "utf8"),
       readFile("Docs/github-action.md", "utf8"),
       readFile("examples/github-actions/limen.yml", "utf8"),
+      readFile("app/components/receipt-lookup-form.tsx", "utf8"),
     ]);
     const docs = `${readme}\n${actionDocs}\n${exampleWorkflow}`;
 
@@ -372,12 +376,20 @@ describe("P7 route and accessibility boundaries", () => {
     expect(setupPage).toContain("HOLD");
     expect(setupPage).toContain("REVIEW");
     expect(setupPage).toContain("setup failure is not");
+    expect(setupPage).toContain("TESTNET / DEMO ONLY");
+    expect(setupPage).toContain("currently uses plain HTTP");
+    expect(setupPage).toContain("Do not use this endpoint for production payment traffic.");
+    expect(setupPage).toContain("Replace it with an approved production endpoint before production deployment.");
     expect(setupPage).not.toContain("SUPABASE_SERVICE_ROLE_KEY");
     expect(setupPage).not.toContain("LIMEN_INGEST_TOKEN");
     expect(setupPage).not.toContain("PAYMENT-SIGNATURE");
     expect(setupStyles).toContain(".setup-step-nav");
     expect(setupStyles).toContain(".setup-code-block");
+    expect(setupStyles).toContain("grid-template-columns: minmax(320px, 1.15fr) minmax(280px, 0.85fr);");
+    expect(setupStyles).toContain(".lookup-shortcut-link");
+    expect(setupStyles).toContain("white-space: nowrap;");
     expect(setupStyles).toContain("@media (max-width: 760px)");
+    expect(receiptLookup).toContain('className="lookup-shortcut-link"');
     expect(docs).toContain(CURRENT_ACTION_REFERENCE);
     expect(docs).toContain(CURRENT_TELEGRAPH_ENGINE_URL);
     expect(docs).not.toContain("<owner>");

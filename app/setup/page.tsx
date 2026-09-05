@@ -175,6 +175,10 @@ export default function SetupPage() {
                     <p>This is the currently validated Telegraph testnet Engine route. It is current setup infrastructure, not a promise of permanent production availability.</p>
                   </div>
                 </div>
+                <div className="setup-note setup-note-warning" role="note">
+                  <strong>TESTNET / DEMO ONLY</strong>
+                  <span>This validated Telegraph testnet Engine route currently uses plain HTTP. Do not use this endpoint for production payment traffic. Replace it with an approved production endpoint before production deployment.</span>
+                </div>
                 <div className="setup-network-row">
                   <span className="context-tag">Base Sepolia</span>
                   <code>{CURRENT_TELEGRAPH_NETWORK}</code>

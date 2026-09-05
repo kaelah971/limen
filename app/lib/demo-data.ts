@@ -8,9 +8,9 @@ export const DEMO_REPOSITORY = "kaelah971/limen-demo";
 export const DEMO_PULL_REQUEST = 1;
 export const DEMO_POLICY_VERSION = "LP-fde4ac5cdba2";
 export const DEMO_HOLD_ACTION_URL =
-  "https://github.com/kaelah971/limen-demo/actions/runs/33654301781";
+  "https://github.com/kaelah971/limen-demo/actions/runs/33958836557";
 export const DEMO_PASS_ACTION_URL =
-  "https://github.com/kaelah971/limen-demo/actions/runs/33655468552";
+  "https://github.com/kaelah971/limen-demo/actions/runs/33959096100";
 export const DEMO_PULL_REQUEST_URL =
   "https://github.com/kaelah971/limen-demo/pull/1";
 

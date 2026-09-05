@@ -1284,6 +1284,13 @@ code,
   font-weight: 600;
 }
 
+.lookup-shortcut-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
 .lookup-shortcut a:hover,
 .text-link:hover {
   color: var(--indigo);
@@ -2408,6 +2415,15 @@ code,
   text-transform: uppercase;
 }
 
+.setup-note-warning {
+  border-left-color: var(--error-ink);
+  background: var(--error-fill);
+}
+
+.setup-note-warning strong {
+  color: var(--error-ink);
+}
+
 .setup-note-hold {
   border-left-color: var(--hold-ink);
   background: #fffaf5;
@@ -2690,7 +2706,7 @@ code,
 
 .setup-links {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(320px, 1.15fr) minmax(280px, 0.85fr);
   gap: 32px;
   align-items: center;
   padding: 32px;

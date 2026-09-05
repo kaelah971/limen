@@ -55,7 +55,7 @@ export function ReceiptLookupForm() {
       </form>
       <div className="lookup-shortcut">
         <p>Start with the live controlled demo:</p>
-        <Link href={`/receipt/${ACTIVE_HOLD_RECEIPT_ID}`}>
+        <Link className="lookup-shortcut-link" href={`/receipt/${ACTIVE_HOLD_RECEIPT_ID}`}>
           Inspect the live HOLD receipt <ArrowRight aria-hidden="true" />
         </Link>
       </div>

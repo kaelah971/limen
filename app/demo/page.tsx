@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Demo workflow",
-  description: "Follow a controlled Limen release decision from pull request to public receipt.",
+  description: "Follow a controlled Limen release decision from pull request to historical public receipt.",
 };
 
 export default async function DemoPage() {
@@ -26,14 +26,14 @@ export default async function DemoPage() {
             <div>
               <p className="eyebrow">Live validated workflow</p>
               <h1>One release. One evidence path.</h1>
-              <p>Follow a real Limen decision from pull request to public receipt.</p>
+              <p>Follow a real Limen decision from pull request to historical public receipt.</p>
             </div>
             <div className="demo-actions">
               <a className="button button-secondary" href={DEMO_PULL_REQUEST_URL} target="_blank" rel="noreferrer noopener">
                 View source pull request <ArrowUpRight aria-hidden="true" />
               </a>
               <Link className="button button-primary" href={`/receipt/${ACTIVE_HOLD_RECEIPT_ID}`}>
-                Inspect final receipt <ArrowUpRight aria-hidden="true" />
+                Inspect historical receipt <ArrowUpRight aria-hidden="true" />
               </Link>
             </div>
           </header>

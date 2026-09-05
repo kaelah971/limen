@@ -164,9 +164,9 @@ export function DemoTrace({ result }: { result: PublicReceiptResult }) {
         <section className="trace-step">
           <div className="trace-marker">07</div>
           <div className="trace-content">
-            <p className="source-label">Durable / public proof</p>
+            <p className="source-label">Historical public receipt</p>
             <h2>The decision leaves a receipt.</h2>
-            <p>The active public receipt is a sanitized projection of the durable evidence record.</p>
+            <p>This historical public receipt is a sanitized projection of the durable evidence record. It is separate from the fresh P14 Judge Mode Action runs above.</p>
             <div className="trace-records">
               <TraceRecord label="Receipt" value={receiptId} />
               <TraceRecord label="Schema" value="limen.receipt.v1" />
@@ -174,7 +174,7 @@ export function DemoTrace({ result }: { result: PublicReceiptResult }) {
               <TraceRecord label="Classification" value={`${release.usageClass} / ${release.source}`} />
             </div>
             <Link className="trace-link" href={`/receipt/${ACTIVE_HOLD_RECEIPT_ID}`}>
-              Inspect the active HOLD receipt <ArrowUpRight aria-hidden="true" />
+              Inspect the historical HOLD receipt <ArrowUpRight aria-hidden="true" />
             </Link>
           </div>
         </section>
