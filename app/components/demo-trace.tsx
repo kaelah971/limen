@@ -220,7 +220,7 @@ export function DemoTrace({ result }: { result: PublicReceiptResult }) {
           <li>Real GitHub pull request evidence</li>
           <li>Real Dependency Review context</li>
           <li>Real paid Telegraph CVE_LOOKUP</li>
-          <li>Real x402 Base Sepolia settlement</li>
+          <li>Separately validated x402 Base Sepolia settlement</li>
           <li>Deterministic policy evaluation</li>
           <li>Real HOLD GitHub result</li>
           <li>Durable hosted evidence ledger</li>

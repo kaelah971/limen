@@ -215,7 +215,10 @@ describe("public receipt API boundary", () => {
 describe("P7 receipt presentation semantics", () => {
   it("prioritizes the HOLD decision and derives a factual next action", () => {
     expect(getPrimaryDecision(HOLD_RECEIPT)?.cveId).toBe("CVE-2021-23337");
-    expect(getNextAction(HOLD_RECEIPT)).toBe("Update lodash beyond 4.17.21 before releasing.");
+    expect(getNextAction(HOLD_RECEIPT)).toBe(
+      "Update the dependency to a version that clears all blocking findings under the current policy.",
+    );
+    expect(getNextAction(HOLD_RECEIPT)).not.toContain("beyond 4.17.21");
     expect(getDecisionReason("HOLD")).toContain("blocking dependency policy condition");
   });
 
@@ -322,8 +325,11 @@ describe("P7 route and accessibility boundaries", () => {
       readFile("app/components/evidence-primitives.tsx", "utf8"),
     ]);
     expect(home).toContain('href="/demo"');
-    expect(home).toContain("ACTIVE_HOLD_RECEIPT_ID");
+    expect(home).toContain("href={`/receipt/${ACTIVE_HOLD_RECEIPT_ID}`}");
+    expect(home).toContain("Update the dependency to a version that clears all blocking findings under the current policy.");
+    expect(home).not.toContain("beyond 4.17.21");
     expect(brand).toContain('href="/proof"');
+    expect(brand).toContain("href={`/receipt/${ACTIVE_HOLD_RECEIPT_ID}`}");
     expect(brand).toContain('href="/setup"');
     expect(brand).toContain('rel="noreferrer noopener"');
     expect(demo).toContain("DEMO_PULL_REQUEST_URL");
@@ -331,6 +337,8 @@ describe("P7 route and accessibility boundaries", () => {
     expect(demoTrace).toContain("DEMO_HOLD_ACTION_URL");
     expect(demoTrace).toContain("DEMO_PASS_ACTION_URL");
     expect(demoTrace).toContain("ACTIVE_HOLD_RECEIPT_ID");
+    expect(demoTrace).toContain("Separately validated x402 Base Sepolia settlement");
+    expect(demoTrace).not.toContain("Real x402 Base Sepolia settlement");
     expect(receipt).toContain("githubPullRequestUrl");
     expect(evidence).toContain('import Link from "next/link"');
     expect(evidence).toContain("/^https?:\\/\\//i.test(href)");

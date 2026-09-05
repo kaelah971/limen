@@ -129,7 +129,7 @@ export default function Home() {
                   <div className="proof-evidence-row"><dt>Telegraph severity</dt><dd>{DEMO_PRIMARY_EVIDENCE.severity}</dd></div>
                   <div className="proof-evidence-row"><dt>CVSS</dt><dd>{DEMO_PRIMARY_EVIDENCE.cvssScore}</dd></div>
                   <div className="proof-evidence-row"><dt>Policy</dt><dd>HIGH is blocking in runtime scope</dd></div>
-                  <div className="proof-evidence-row"><dt>Next action</dt><dd>Update lodash beyond {DEMO_PRIMARY_EVIDENCE.firstPatchedVersion}</dd></div>
+                  <div className="proof-evidence-row"><dt>Next action</dt><dd>Update the dependency to a version that clears all blocking findings under the current policy.</dd></div>
                 </dl>
                 <div className="proof-stat-panel">
                   <div className="proof-stat"><span className="proof-stat-label">Miner</span><strong className="proof-stat-value">{DEMO_PRIMARY_EVIDENCE.minerName}</strong></div>

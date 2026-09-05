@@ -1,6 +1,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { ArrowUpRight } from "lucide-react";
+import { ACTIVE_HOLD_RECEIPT_ID } from "@/app/lib/demo-data";
 
 export function LimenLogo() {
   return (
@@ -45,7 +46,7 @@ export function LimenHeader() {
           <NavigationLinks />
         </nav>
         <div className="header-actions">
-          <Link className="button button-primary" href="/proof">
+          <Link className="button button-primary" href={`/receipt/${ACTIVE_HOLD_RECEIPT_ID}`}>
             Inspect proof
             <ArrowUpRight aria-hidden="true" />
           </Link>

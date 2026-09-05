@@ -53,8 +53,8 @@ export function getNextAction(receipt: LimenEvidenceReceipt): string {
   const primary = getPrimaryDecision(receipt);
   if (release.overallDecision === "HOLD") {
     const evidence = primary?.repositoryEvidence;
-    return evidence?.firstPatchedVersion
-      ? `Update ${evidence.packageName} beyond ${evidence.firstPatchedVersion} before releasing.`
+    return evidence
+      ? "Update the dependency to a version that clears all blocking findings under the current policy."
       : "Resolve the blocking dependency condition before releasing.";
   }
   if (release.overallDecision === "REVIEW") {
