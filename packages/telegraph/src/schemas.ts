@@ -6,6 +6,12 @@ import {
 } from "../../core/src/errors/errors";
 import { assertExpectedNetwork, networksMatch, normalizeNetwork } from "./network";
 
+export const BASE_SEPOLIA_USDC_ASSET =
+  "0x036CbD53842c5426634e7929541eC2318f3DCf7e";
+export const MAX_PAYMENT_AMOUNT_BASE_UNITS = BigInt(50_000);
+export const MAX_RUN_PAYMENT_AMOUNT_BASE_UNITS = BigInt(250_000);
+export const MAX_PAYMENT_TIMEOUT_SECONDS = 120;
+
 const PaymentRequirementsSchema = z
   .object({
     scheme: z.string().min(1),
@@ -13,7 +19,7 @@ const PaymentRequirementsSchema = z
     asset: z.string().min(1),
     amount: z.string().regex(/^\d+$/),
     payTo: z.string().min(1),
-    maxTimeoutSeconds: z.number().int().positive(),
+    maxTimeoutSeconds: z.number().int().positive().max(MAX_PAYMENT_TIMEOUT_SECONDS),
     extra: z.record(z.string(), z.unknown()),
   })
   .passthrough();
@@ -30,6 +36,102 @@ export type ValidatedPaymentChallenge = z.infer<
 > & {
   x402Version: 2;
 };
+
+function isEvmAddress(value: string): boolean {
+  return /^0x[0-9a-fA-F]{40}$/.test(value) && !/^0x0{40}$/i.test(value);
+}
+
+export function parsePaymentAmount(value: string): bigint {
+  if (typeof value !== "string" || value.length === 0 || value.length > 24 || !/^\d+$/.test(value)) {
+    throw new TelegraphChallengeError(
+      "Telegraph returned an invalid payment amount.",
+    );
+  }
+
+  try {
+    const amount = BigInt(value);
+    if (amount <= BigInt(0) || amount > MAX_PAYMENT_AMOUNT_BASE_UNITS) {
+      throw new TelegraphChallengeError(
+        "Telegraph requested an amount outside the Judge Mode payment ceiling.",
+        { maxAmountBaseUnits: MAX_PAYMENT_AMOUNT_BASE_UNITS.toString() },
+      );
+    }
+    return amount;
+  } catch (error) {
+    if (error instanceof TelegraphChallengeError) {
+      throw error;
+    }
+    throw new TelegraphChallengeError("Telegraph returned an invalid payment amount.");
+  }
+}
+
+function assertAuthorizedAmount(authorizedAmountBaseUnits: bigint): void {
+  if (
+    typeof authorizedAmountBaseUnits !== "bigint" ||
+    authorizedAmountBaseUnits < BigInt(0) ||
+    authorizedAmountBaseUnits > MAX_RUN_PAYMENT_AMOUNT_BASE_UNITS
+  ) {
+    throw new TelegraphChallengeError(
+      "Telegraph payment authorization state is invalid.",
+    );
+  }
+}
+
+export function assertPaymentRequirement(
+  requirement: Pick<ValidatedPaymentChallenge, "scheme" | "network" | "asset" | "amount" | "payTo" | "maxTimeoutSeconds">,
+  expectedNetwork: string,
+  authorizedAmountBaseUnits = BigInt(0),
+): bigint {
+  assertAuthorizedAmount(authorizedAmountBaseUnits);
+  if (requirement.scheme !== "exact") {
+    throw new TelegraphChallengeError(
+      "Telegraph did not offer the required exact payment scheme.",
+      { scheme: requirement.scheme },
+    );
+  }
+  assertExpectedNetwork(requirement.network, expectedNetwork);
+  if (requirement.asset.toLowerCase() !== BASE_SEPOLIA_USDC_ASSET.toLowerCase()) {
+    throw new TelegraphChallengeError(
+      "Telegraph requested an unsupported payment asset.",
+      { asset: requirement.asset },
+    );
+  }
+  if (!isEvmAddress(requirement.payTo)) {
+    throw new TelegraphChallengeError(
+      "Telegraph returned an invalid payment recipient.",
+    );
+  }
+  if (!Number.isSafeInteger(requirement.maxTimeoutSeconds) ||
+      requirement.maxTimeoutSeconds <= 0 ||
+      requirement.maxTimeoutSeconds > MAX_PAYMENT_TIMEOUT_SECONDS) {
+    throw new TelegraphChallengeError(
+      "Telegraph returned an invalid payment timeout.",
+    );
+  }
+
+  const amount = parsePaymentAmount(requirement.amount);
+  if (authorizedAmountBaseUnits + amount > MAX_RUN_PAYMENT_AMOUNT_BASE_UNITS) {
+    throw new TelegraphChallengeError(
+      "Telegraph payment would exceed the per-run Judge Mode spending ceiling.",
+      { maxRunAmountBaseUnits: MAX_RUN_PAYMENT_AMOUNT_BASE_UNITS.toString() },
+    );
+  }
+  return amount;
+}
+
+export function reservePaymentAmount(
+  state: { authorizedAmountBaseUnits: bigint },
+  amount: bigint,
+): void {
+  assertAuthorizedAmount(state.authorizedAmountBaseUnits);
+  if (state.authorizedAmountBaseUnits + amount > MAX_RUN_PAYMENT_AMOUNT_BASE_UNITS) {
+    throw new TelegraphChallengeError(
+      "Telegraph payment would exceed the per-run Judge Mode spending ceiling.",
+      { maxRunAmountBaseUnits: MAX_RUN_PAYMENT_AMOUNT_BASE_UNITS.toString() },
+    );
+  }
+  state.authorizedAmountBaseUnits += amount;
+}
 
 export function verifyEngineIntent(response: unknown): void {
   if (response === null || typeof response !== "object" || Array.isArray(response)) {
@@ -96,6 +198,8 @@ export function validatePaymentChallenge(
       },
     );
   }
+
+  assertPaymentRequirement(exactRequirement, normalizedExpectedNetwork);
 
   return {
     ...exactRequirement,

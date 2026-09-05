@@ -1,5 +1,8 @@
 import { z } from "zod";
 import {
+  assertGitHubApiUrl,
+} from "./config";
+import {
   GitHubAdvisoryNotFoundError,
   GitHubApiError,
   GitHubAuthError,
@@ -33,6 +36,22 @@ import type {
 
 const FULL_SHA_PATTERN = /^[0-9a-f]{40}$/i;
 const ABBREVIATED_SHA_PATTERN = /^[0-9a-f]{7,39}$/i;
+const MAX_RESPONSE_BODY_BYTES = 2 * 1024 * 1024;
+
+function assertResponseBodySize(response: Response, operation: string): void {
+  const contentLength = response.headers.get("content-length");
+  if (contentLength === null) {
+    return;
+  }
+
+  const parsedLength = Number(contentLength);
+  if (!Number.isFinite(parsedLength) || parsedLength > MAX_RESPONSE_BODY_BYTES) {
+    throw new GitHubApiError("The GitHub API response body is too large.", {
+      operation,
+      reason: "response_too_large",
+    });
+  }
+}
 
 export interface GitHubClientOptions {
   config: GitHubConfig;
@@ -121,6 +140,7 @@ async function readBody(
   operation: string,
   onTimeout?: () => void,
 ): Promise<unknown> {
+  assertResponseBodySize(response, operation);
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const text = await Promise.race([
     response.text(),
@@ -138,6 +158,12 @@ async function readBody(
       clearTimeout(timeout);
     }
   });
+  if (Buffer.byteLength(text, "utf8") > MAX_RESPONSE_BODY_BYTES) {
+    throw new GitHubApiError("The GitHub API response body is too large.", {
+      operation,
+      reason: "response_too_large",
+    });
+  }
   if (text.trim() === "") {
     return undefined;
   }
@@ -173,6 +199,7 @@ export class GitHubClientImpl implements GitHubClient {
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: GitHubClientOptions) {
+    assertGitHubApiUrl(options.config.apiUrl);
     this.config = {
       ...options.config,
       apiUrl: options.config.apiUrl.replace(/\/$/, ""),
@@ -191,6 +218,7 @@ export class GitHubClientImpl implements GitHubClient {
     try {
       const response = await this.fetchImpl(`${this.config.apiUrl}${path}`, {
         method: "GET",
+        redirect: "error",
         headers: {
           accept: "application/vnd.github+json",
           "X-GitHub-Api-Version": this.config.apiVersion,

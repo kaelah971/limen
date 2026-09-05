@@ -1,11 +1,15 @@
 import { z } from "zod";
-import { ConfigurationError } from "../../core/src/errors/errors";
+import { ConfigurationError, parseOutboundUrl } from "../../core/src";
 import { BASE_SEPOLIA_NETWORK, normalizeNetwork } from "./network";
 import type { TelegraphConfig } from "./types";
 
 const PRIVATE_KEY_PATTERN = /^0x[0-9a-fA-F]{64}$/;
 const NETWORK_PATTERN = /^[^:\s]+:[^:\s]+$/;
-const EngineUrlSchema = z.string().url();
+export const CANONICAL_TELEGRAPH_ENGINE_URL =
+  "http://13.237.89.59:7044/engine/v1/ask";
+const EngineUrlSchema = z.string().refine(isAllowedEngineUrl, {
+  message: "TELEGRAPH_ENGINE_URL must be the validated Judge Mode Engine endpoint.",
+});
 const PrivateKeySchema = z.string().regex(PRIVATE_KEY_PATTERN);
 const TimeoutSchema = z.coerce.number().int().positive().max(120_000);
 
@@ -35,6 +39,27 @@ export interface TelegraphConfigurationDiagnostics {
 function trimOptional(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed === undefined || trimmed === "" ? undefined : trimmed;
+}
+
+function isAllowedEngineUrl(value: string): boolean {
+  try {
+    const parsed = parseOutboundUrl(value, {
+      name: "Telegraph Engine",
+      allowHttpHosts: new Set(["13.237.89.59"]),
+    });
+    return parsed.href === CANONICAL_TELEGRAPH_ENGINE_URL;
+  } catch {
+    return false;
+  }
+}
+
+export function assertTelegraphEngineUrl(value: string): void {
+  if (!isAllowedEngineUrl(value)) {
+    throw new ConfigurationError(
+      "TELEGRAPH_ENGINE_URL must be the validated Judge Mode Engine endpoint.",
+      { field: "TELEGRAPH_ENGINE_URL" },
+    );
+  }
 }
 
 export function diagnoseTelegraphConfiguration(
@@ -99,6 +124,8 @@ export function loadTelegraphConfig(
       },
     );
   }
+
+  assertTelegraphEngineUrl(parsed.data.TELEGRAPH_ENGINE_URL);
 
   const normalizedExpectedNetwork = normalizeNetwork(parsed.data.TELEGRAPH_EXPECTED_NETWORK);
   if (!NETWORK_PATTERN.test(normalizedExpectedNetwork)) {

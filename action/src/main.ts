@@ -3,6 +3,7 @@ import { context as githubContext } from "@actions/github";
 import {
   createObservabilityLogger,
   isLimenError,
+  redactString,
   serializeError,
   startObservabilityStage,
   type LimenCorrelationContext,
@@ -47,17 +48,18 @@ export function applyActionOutcome(
   result: LimenRunResult,
   runtime: ActionOutcomeRuntime = actionsCore,
 ): void {
+  const safeSummary = redactString(result.runSummary);
   if (result.overallDecision === "PASS") {
     runtime.notice("Limen: PASS");
     return;
   }
   if (result.overallDecision === "HOLD") {
-    runtime.error(`Limen: HOLD. ${result.runSummary}`);
-    runtime.setFailed(`Limen: HOLD. ${result.runSummary}`);
+    runtime.error(`Limen: HOLD. ${safeSummary}`);
+    runtime.setFailed(`Limen: HOLD. ${safeSummary}`);
     return;
   }
-  runtime.warning(`Limen: REVIEW. ${result.runSummary}`);
-  runtime.setFailed(`Limen: REVIEW. ${result.runSummary}`);
+  runtime.warning(`Limen: REVIEW. ${safeSummary}`);
+  runtime.setFailed(`Limen: REVIEW. ${safeSummary}`);
 }
 
 export function createTelegraphFactory(

@@ -1,4 +1,5 @@
 export {
+  assertGitHubApiUrl,
   GITHUB_API_URL,
   GITHUB_API_VERSION,
   loadGitHubConfig,

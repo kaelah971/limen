@@ -9,11 +9,14 @@ import {
   assertExpectedNetwork,
   isBaseSepoliaConfig,
   loadTelegraphConfig,
+  MAX_PAYMENT_AMOUNT_BASE_UNITS,
+  MAX_PAYMENT_TIMEOUT_SECONDS,
+  BASE_SEPOLIA_USDC_ASSET,
   validatePaymentChallenge,
 } from "../packages/telegraph/src";
 
 const validEnvironment = {
-  TELEGRAPH_ENGINE_URL: "https://engine.example.test/v1/ask",
+  TELEGRAPH_ENGINE_URL: "http://13.237.89.59:7044/engine/v1/ask",
   TELEGRAPH_PRIVATE_KEY: `0x${"0".repeat(64)}`,
   TELEGRAPH_EXPECTED_NETWORK: "base-sepolia",
   TELEGRAPH_TIMEOUT_MS: "5000",
@@ -24,7 +27,7 @@ const syntheticPrivateKey = `0x${"a".repeat(64)}`;
 const validRequirement = {
   scheme: "exact",
   network: BASE_SEPOLIA_NETWORK,
-  asset: "0x0000000000000000000000000000000000000001",
+  asset: BASE_SEPOLIA_USDC_ASSET,
   amount: "10000",
   payTo: "0x0000000000000000000000000000000000000002",
   maxTimeoutSeconds: 60,
@@ -82,6 +85,18 @@ describe("loadTelegraphConfig", () => {
         TELEGRAPH_ENGINE_URL: "not-a-url",
       }),
     ).toThrowError(ConfigurationError);
+  });
+
+  it.each([
+    "https://engine.example.test/v1/ask",
+    "http://127.0.0.1:7044/engine/v1/ask",
+    "http://169.254.169.254/engine/v1/ask",
+    "https://attacker.example/engine/v1/ask",
+  ])("rejects an unapproved Engine origin: %s", (engineUrl) => {
+    expect(() => loadTelegraphConfig({
+      ...validEnvironment,
+      TELEGRAPH_ENGINE_URL: engineUrl,
+    })).toThrowError(ConfigurationError);
   });
 
   it("rejects an invalid expected network format", () => {
@@ -158,6 +173,35 @@ describe("payment challenge validation", () => {
         BASE_SEPOLIA_NETWORK,
       ),
     ).toThrow("required exact payment scheme");
+  });
+
+  it.each([
+    ["malformed recipient", { payTo: "not-an-address" }],
+    ["zero recipient", { payTo: "0x0000000000000000000000000000000000000000" }],
+    ["unexpected asset", { asset: "0x0000000000000000000000000000000000000001" }],
+    ["amount above ceiling", { amount: "50001" }],
+    ["huge amount", { amount: "9".repeat(25) }],
+    ["zero amount", { amount: "0" }],
+    ["excessive timeout", { maxTimeoutSeconds: MAX_PAYMENT_TIMEOUT_SECONDS + 1 }],
+    ["malformed timeout", { maxTimeoutSeconds: "60" }],
+  ] as const)("rejects %s before payment construction", (_label, overrides) => {
+    expect(() => validatePaymentChallenge(
+      {
+        x402Version: 2,
+        accepts: [{ ...validRequirement, ...overrides }],
+      },
+      BASE_SEPOLIA_NETWORK,
+    )).toThrow();
+  });
+
+  it("accepts the exact per-request ceiling and rejects the synthetic test asset", () => {
+    expect(validatePaymentChallenge(
+      {
+        x402Version: 2,
+        accepts: [{ ...validRequirement, amount: MAX_PAYMENT_AMOUNT_BASE_UNITS.toString() }],
+      },
+      BASE_SEPOLIA_NETWORK,
+    ).amount).toBe("50000");
   });
 
   it("rejects an unsupported x402 version", () => {

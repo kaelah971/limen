@@ -1,4 +1,8 @@
 import {
+  LOCAL_HOSTS,
+  parseOutboundUrl,
+} from "../../core/src";
+import {
   PersistedRunDetailSchema,
   PersistedRunSchema,
 } from "./schemas";
@@ -9,6 +13,8 @@ import type {
   PersistedRun,
   PersistedRunDetail,
 } from "./types";
+
+const MAX_RESPONSE_BODY_BYTES = 2 * 1024 * 1024;
 
 export class LedgerClientError extends Error {
   readonly code = "LEDGER_CLIENT_ERROR" as const;
@@ -40,7 +46,17 @@ export interface LedgerHttpClientOptions {
 }
 
 async function readJson(response: Response): Promise<unknown> {
+  const contentLength = response.headers.get("content-length");
+  if (contentLength !== null) {
+    const parsedLength = Number(contentLength);
+    if (!Number.isFinite(parsedLength) || parsedLength > MAX_RESPONSE_BODY_BYTES) {
+      throw new LedgerClientError("The evidence ledger response body is too large.");
+    }
+  }
   const text = await response.text();
+  if (Buffer.byteLength(text, "utf8") > MAX_RESPONSE_BODY_BYTES) {
+    throw new LedgerClientError("The evidence ledger response body is too large.");
+  }
   if (text.trim() === "") {
     return null;
   }
@@ -62,16 +78,15 @@ function responseCode(body: unknown): string | undefined {
 }
 
 function endpointUrl(baseUrl: string, suffix: string): string {
-  let parsed: URL;
   try {
-    parsed = new URL(baseUrl);
+    const parsed = parseOutboundUrl(baseUrl, {
+      name: "Evidence ledger",
+      allowHttpHosts: LOCAL_HOSTS,
+    });
+    return `${parsed.toString().replace(/\/$/, "")}${suffix}`;
   } catch {
     throw new LedgerClientError("The evidence ledger URL is invalid.");
   }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new LedgerClientError("The evidence ledger URL must use HTTP or HTTPS.");
-  }
-  return `${parsed.toString().replace(/\/$/, "")}${suffix}`;
 }
 
 export class LedgerIngestClient implements Pick<EvidenceLedger, "persistRun" | "getRun"> {
@@ -122,6 +137,7 @@ export class LedgerIngestClient implements Pick<EvidenceLedger, "persistRun" | "
     try {
       const response = await this.fetchImpl(endpointUrl(this.options.url, path), {
         ...init,
+        redirect: "error",
         signal: controller.signal,
         headers: {
           accept: "application/json",

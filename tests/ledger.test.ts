@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createLedgerServer,
+  loadLedgerApiConfig,
   LedgerConflictError,
   LedgerPersistenceError,
   SupabaseEvidenceLedger,
@@ -13,6 +14,8 @@ import { persistActionLedger } from "../action/src/persist";
 import type { ActionPullRequestContext, LimenRunResult } from "../action/src/types";
 import {
   validateLedgerRunIngest,
+  LedgerIngestClient,
+  LedgerClientError,
   backfillSanitizedRun,
   type EvidenceLedger,
   type LedgerRunIngest,
@@ -383,6 +386,74 @@ describe("Action ledger optionality", () => {
     expect(result.overallDecision).toBe("HOLD");
     expect(result.ledgerStatus).toBe("not-configured");
     expect(warnings).toEqual([]);
+  });
+});
+
+describe("ledger outbound origin boundary", () => {
+  it("requires HTTPS for hosted Supabase while allowing explicit localhost development", () => {
+    const base = {
+      SUPABASE_SERVICE_ROLE_KEY: "service-role-placeholder",
+      LIMEN_INGEST_TOKEN: "ingest-placeholder",
+    };
+    expect(() => loadLedgerApiConfig({
+      ...base,
+      SUPABASE_URL: "http://supabase.attacker.example",
+    })).toThrow();
+    expect(loadLedgerApiConfig({
+      ...base,
+      SUPABASE_URL: "http://127.0.0.1:54321",
+    }).supabaseUrl).toBe("http://127.0.0.1:54321");
+  });
+
+  it("allows localhost development URLs but rejects remote HTTP and unsafe redirects", async () => {
+    for (const url of [
+      "http://169.254.169.254/latest/meta-data",
+      "http://ledger.attacker.example",
+      "https://ledger.example.test?redirect=https://attacker.example",
+      "https://user:password@ledger.example.test",
+    ]) {
+      const rejectedFetch = vi.fn();
+      const rejected = new LedgerIngestClient({
+        url,
+        token: "ledger-secret",
+        fetch: rejectedFetch,
+      });
+      await expect(rejected.persistRun(makeIngest("PASS"))).rejects.toThrow(LedgerClientError);
+      expect(rejectedFetch).not.toHaveBeenCalled();
+    }
+
+    const calls: RequestInit[] = [];
+    const localhost = new LedgerIngestClient({
+      url: "http://127.0.0.1:8787",
+      token: "ledger-secret",
+      fetch: (input, init) => {
+        void input;
+        calls.push(init ?? {});
+        return Promise.resolve(new Response(JSON.stringify({ id: "LM-RUN-TEST-001", created: true }), { status: 200 }));
+      },
+    });
+    await expect(localhost.persistRun(makeIngest("PASS"))).resolves.toEqual({
+      id: "LM-RUN-TEST-001",
+      created: true,
+    });
+    expect(calls[0]?.redirect).toBe("error");
+
+    const redirectCalls: RequestInit[] = [];
+    const redirected = new LedgerIngestClient({
+      url: "https://ledger.example.test",
+      token: "ledger-secret",
+      fetch: (input, init) => {
+        void input;
+        redirectCalls.push(init ?? {});
+        return Promise.resolve(new Response("", {
+          status: 302,
+          headers: { location: "https://attacker.example/collect" },
+        }));
+      },
+    });
+    await expect(redirected.persistRun(makeIngest("PASS"))).rejects.toThrow(LedgerClientError);
+    expect(redirectCalls).toHaveLength(1);
+    expect(redirectCalls[0]?.redirect).toBe("error");
   });
 });
 

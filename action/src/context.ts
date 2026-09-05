@@ -36,9 +36,9 @@ function requiredContextValue(value: string, field: string): string {
 export function parsePullRequestContext(
   input: ParsePullRequestContextInput,
 ): ActionPullRequestContext {
-  if (input.eventName !== "pull_request" && input.eventName !== "pull_request_target") {
+  if (input.eventName !== "pull_request") {
     throw new GitHubConfigurationError(
-      "Limen supports only pull_request and pull_request_target events.",
+      "Limen supports only pull_request events.",
       { eventName: input.eventName },
     );
   }

@@ -15,6 +15,7 @@ import {
   GitHubAdvisoryNotFoundError,
   GitHubApiError,
   GitHubDependencySnapshotWarningError,
+  GitHubResponseError,
   GitHubClient,
   type GitHubDependencyReviewChangeDto,
   type GitHubGlobalAdvisoryDto,
@@ -224,7 +225,7 @@ describe("P3 action context and inputs", () => {
     })).toEqual(actionContext);
   });
 
-  it("supports pull_request_target and rejects unsupported or abbreviated context", () => {
+  it("rejects pull_request_target and unsupported or abbreviated context", () => {
     const payload = {
       pull_request: {
         number: 1,
@@ -232,12 +233,12 @@ describe("P3 action context and inputs", () => {
         head: { sha: HEAD_SHA },
       },
     };
-    expect(parsePullRequestContext({
+    expect(() => parsePullRequestContext({
       eventName: "pull_request_target",
       owner: "owner",
       repo: "repo",
       payload,
-    }).eventName).toBe("pull_request_target");
+    })).toThrow(/only pull_request/);
     expect(() => parsePullRequestContext({
       eventName: "push",
       owner: "owner",
@@ -439,6 +440,21 @@ describe("base policy retrieval", () => {
     await expect(loadBaseCommitPolicy(invalid, actionContext)).rejects.toThrowError(
       LimenPolicyValidationError,
     );
+  });
+
+  it("rejects an oversized base policy before parsing", async () => {
+    const github = makeGitHubClient([]);
+    github.getRepositoryFile.mockResolvedValue({
+      data: {
+        type: "file",
+        encoding: "base64",
+        content: Buffer.from("x".repeat(65 * 1024), "utf8").toString("base64"),
+        path: "limen.yml",
+      },
+      metadata,
+    });
+
+    await expect(loadBaseCommitPolicy(github, actionContext)).rejects.toThrowError(GitHubResponseError);
   });
 });
 
@@ -802,6 +818,17 @@ describe("P3 aggregation, UX, and build boundaries", () => {
     expect(summary).not.toContain("private-key");
   });
 
+  it("neutralizes provider-controlled Markdown in the Action summary", () => {
+    const summary = renderSummary({
+      ...makeRun("REVIEW"),
+      runSummary: "[attacker](https://evil.example) <img src=x>",
+    });
+
+    expect(summary).not.toContain("[attacker](https://evil.example)");
+    expect(summary).toContain("\\[attacker\\]");
+    expect(summary).toContain("&lt;img src=x&gt;");
+  });
+
   it.each([
     ["PASS", "notice", false],
     ["HOLD", "error", true],
@@ -817,6 +844,22 @@ describe("P3 aggregation, UX, and build boundaries", () => {
     applyActionOutcome(makeRun(decision), runtime);
     expect(calls.some((call) => call.startsWith(`${method}:`))).toBe(true);
     expect(calls.some((call) => call.startsWith("failed:"))).toBe(shouldFail);
+  });
+
+  it("strips terminal control characters from Action outcome output", () => {
+    const calls: string[] = [];
+    applyActionOutcome(
+      { ...makeRun("REVIEW"), runSummary: "\u001b[31mprovider\u0007" },
+      {
+        notice: (message) => calls.push(message),
+        error: (message) => calls.push(message),
+        warning: (message) => calls.push(message),
+        setFailed: (message) => calls.push(message),
+      },
+    );
+
+    expect(calls.join("\n")).not.toContain("\u001b");
+    expect(calls.join("\n")).not.toContain("\u0007");
   });
 
   it("points action metadata at the bundled Node 24 entrypoint", async () => {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   GITHUB_API_VERSION,
   GitHubAdvisoryNotFoundError,
@@ -8,6 +8,8 @@ import {
   GitHubPermissionError,
   GitHubRateLimitError,
   GitHubResponseError,
+  GITHUB_API_URL,
+  GitHubApiError,
   createGitHubClient,
   loadGitHubConfig,
   type GitHubConfig,
@@ -69,6 +71,24 @@ describe("loadGitHubConfig", () => {
       loadGitHubConfig({ GITHUB_API_URL: "not-a-url" }),
     ).toThrowError(GitHubConfigurationError);
   });
+
+  it.each([
+    "http://api.github.com",
+    "https://attacker.example",
+    "https://localhost",
+    "https://127.0.0.1",
+  ])("rejects an untrusted runtime API origin: %s", (apiUrl) => {
+    expect(() => loadGitHubConfig({ GITHUB_API_URL: apiUrl }))
+      .toThrowError(GitHubConfigurationError);
+    const fetchImpl = vi.fn();
+    expect(() => createGitHubClient(
+      { ...config, apiUrl },
+      { fetch: fetchImpl },
+    ))
+      .toThrowError(GitHubConfigurationError);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(GITHUB_API_URL).toBe("https://api.github.com");
+  });
 });
 
 describe("GitHubClientImpl", () => {
@@ -118,6 +138,43 @@ describe("GitHubClientImpl", () => {
     expect(new Headers(calls[0]?.init?.headers).get("Authorization")).toBe(
       "Bearer example-value",
     );
+  });
+
+  it("rejects redirects before a credential-bearing follow-up request", async () => {
+    const { client, calls } = createClient([
+      new Response("", {
+        status: 302,
+        headers: { location: "https://attacker.example/collect" },
+      }),
+    ], { token: "example-secret" });
+
+    await expect(client.getGlobalAdvisory({ ghsaId: "GHSA-35jh-r3h4-6jhm" }))
+      .rejects.toThrowError(GitHubApiError);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.init?.redirect).toBe("error");
+    expect(new Headers(calls[0]?.init?.headers).get("Authorization"))
+      .toBe("Bearer example-secret");
+  });
+
+  it("rejects an oversized response before reading provider-controlled content", async () => {
+    const text = vi.fn(async () => "never-read");
+    const response = {
+      status: 200,
+      headers: new Headers({ "content-length": String(2 * 1024 * 1024 + 1) }),
+      text,
+    } as unknown as Response;
+    const { client } = createClient([response]);
+
+    await expect(client.compareDependencies({
+      owner: "owner",
+      repo: "repo",
+      base: "base-ref",
+      head: "head-ref",
+    })).rejects.toMatchObject({
+      code: "GITHUB_API_ERROR",
+      details: { reason: "response_too_large" },
+    });
+    expect(text).not.toHaveBeenCalled();
   });
 
   it("retrieves advisories and Dependabot alerts through read-only GET endpoints", async () => {

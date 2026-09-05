@@ -20,7 +20,7 @@ export interface ActionPullRequestContext {
   baseSha: string;
   headSha: string;
   actor: string;
-  eventName: "pull_request" | "pull_request_target";
+  eventName: "pull_request";
   authorAssociation: string;
   githubRunId?: number;
   githubRunAttempt?: number;

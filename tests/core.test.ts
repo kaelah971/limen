@@ -60,4 +60,21 @@ describe("redaction", () => {
     expect(serialized).toContain("miner-42");
     expect(serialized).toContain("TELEGRAPH_PAYMENT_ERROR");
   });
+
+  it("redacts sensitive query parameters and removes terminal control sequences", () => {
+    const value = "https://miner.example/result?cve=CVE-2021-23337&token=secret-value&key=another-secret&nested=https%3A%2F%2Finner.example%3Ftoken%3Dnested-secret Authorization: bearer-secret PAYMENT-SIGNATURE: payment-secret\u001b[31mALERT\u0007";
+    const redacted = redactSecrets({ nested: value });
+    const serialized = JSON.stringify(redacted);
+
+    expect(serialized).toContain("cve=CVE-2021-23337");
+    expect(serialized).toContain("token=[REDACTED]");
+    expect(serialized).toContain("key=[REDACTED]");
+    expect(serialized).not.toContain("secret-value");
+    expect(serialized).not.toContain("another-secret");
+    expect(serialized).not.toContain("nested-secret");
+    expect(serialized).not.toContain("bearer-secret");
+    expect(serialized).not.toContain("payment-secret");
+    expect(serialized).not.toContain("\\u001b");
+    expect(serialized).not.toContain("\\u0007");
+  });
 });

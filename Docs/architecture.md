@@ -114,7 +114,7 @@ validated base SHA / head SHA
 
 The Action does not create a competing per-CVE decision format. `LimenRunResult` is only a run envelope containing canonical `LimenDecisionResult[]`, context, policy version, lookup accounting, and aggregation state. Telegraph is initialized lazily only when an active CVE requires a paid lookup.
 
-For a PR, policy authority is always the base SHA. A policy file changed by the PR head is ignored for the current decision, preventing a change from weakening its own release gate. The Action supports `pull_request` and `pull_request_target`, but both paths use event metadata and REST APIs only; no target checkout or command execution is required.
+For a PR, policy authority is always the base SHA. A policy file changed by the PR head is ignored for the current decision, preventing a change from weakening its own release gate. The Action supports `pull_request` only and uses event metadata and REST APIs; no target checkout or command execution is required.
 
 ## Telegraph Flow
 

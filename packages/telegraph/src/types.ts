@@ -30,7 +30,14 @@ export interface PreparedPayment {
   scheme: string;
   amount: string;
   asset: string;
+  payTo: string;
+  maxTimeoutSeconds: number;
+  spendReserved?: boolean;
   costUsd: number | null;
+}
+
+export interface PaymentAuthorizationState {
+  authorizedAmountBaseUnits: bigint;
 }
 
 export interface TelegraphPaymentAdapter {

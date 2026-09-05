@@ -123,7 +123,10 @@ function safeLogValue(value: unknown): unknown {
   }
 
   return Object.fromEntries(
-    Object.entries(value).map(([key, nestedValue]) => [key, safeLogValue(nestedValue)]),
+    Object.entries(value).map(([key, nestedValue]) => [
+      redactString(key),
+      safeLogValue(nestedValue),
+    ]),
   );
 }
 

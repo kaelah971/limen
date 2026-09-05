@@ -12,6 +12,8 @@ import {
 } from "../../packages/github/src";
 import type { ActionPullRequestContext } from "./types";
 
+const MAX_POLICY_BYTES = 64 * 1024;
+
 function isNotFound(error: unknown): boolean {
   return isLimenError(error) && error.code === "GITHUB_API_ERROR" && error.details?.status === 404;
 }
@@ -53,6 +55,12 @@ export async function loadBaseCommitPolicy(
           ref: context.baseSha,
         });
         const source = decodePolicyContent(response.data.content, path);
+        if (Buffer.byteLength(source, "utf8") > MAX_POLICY_BYTES) {
+          throw new GitHubResponseError("GitHub returned a policy file that is too large.", {
+            path,
+            maxBytes: MAX_POLICY_BYTES,
+          });
+        }
         const parseStage = startObservabilityStage(
           observability?.logger,
           "policy-parse",

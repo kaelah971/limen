@@ -6,6 +6,8 @@ export {
 } from "./network";
 
 export {
+  assertTelegraphEngineUrl,
+  CANONICAL_TELEGRAPH_ENGINE_URL,
   diagnoseTelegraphConfiguration,
   isBaseSepoliaConfig,
   loadTelegraphConfig,
@@ -13,7 +15,14 @@ export {
 } from "./config";
 
 export {
+  assertPaymentRequirement,
   assertSuccessfulEngineResponse,
+  BASE_SEPOLIA_USDC_ASSET,
+  MAX_PAYMENT_AMOUNT_BASE_UNITS,
+  MAX_PAYMENT_TIMEOUT_SECONDS,
+  MAX_RUN_PAYMENT_AMOUNT_BASE_UNITS,
+  parsePaymentAmount,
+  reservePaymentAmount,
   validatePaymentChallenge,
   verifyEngineIntent,
   type ValidatedPaymentChallenge,
@@ -39,4 +48,5 @@ export type {
   TelegraphClient,
   TelegraphConfig,
   TelegraphPaymentAdapter,
+  PaymentAuthorizationState,
 } from "./types";

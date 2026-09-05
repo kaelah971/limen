@@ -389,6 +389,15 @@ describe("P7 route and accessibility boundaries", () => {
     expect(setupMetadata.openGraph).toMatchObject({ title: "Set up Limen | Limen", url: "/setup" });
   });
 
+  it("declares basic public-web security headers", async () => {
+    const config = await readFile("next.config.ts", "utf8");
+    expect(config).toContain("X-Content-Type-Options");
+    expect(config).toContain("nosniff");
+    expect(config).toContain("strict-origin-when-cross-origin");
+    expect(config).toContain("frame-ancestors 'none'");
+    expect(config).toContain("connect-src 'self'");
+  });
+
   it("defines the responsive evidence path and reduced-motion behavior", async () => {
     const styles = await readFile("app/globals.css", "utf8");
     expect(styles).toContain(".evidence-path");

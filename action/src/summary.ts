@@ -8,6 +8,13 @@ import type { LimenRunResult } from "./types";
 function safe(value: unknown): string {
   return redactString(String(value ?? "not provided"))
     .replace(/[|`\r\n]/g, " ")
+    .replace(/\\/g, "\\\\")
+    .replace(/\[/g, "\\[")
+    .replace(/\]/g, "\\]")
+    .replace(/\(/g, "\\(")
+    .replace(/\)/g, "\\)")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
     .trim();
 }
 

@@ -6,7 +6,7 @@ export const GITHUB_API_VERSION = "2026-03-10";
 export const GITHUB_API_URL = "https://api.github.com";
 
 const EnvironmentSchema = z.object({
-  GITHUB_API_URL: z.string().url().default(GITHUB_API_URL),
+  GITHUB_API_URL: z.literal(GITHUB_API_URL).default(GITHUB_API_URL),
   GITHUB_API_VERSION: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -42,4 +42,13 @@ export function loadGitHubConfig(
       : { token: parsed.data.GITHUB_TOKEN }),
     timeoutMs: parsed.data.GITHUB_TIMEOUT_MS,
   };
+}
+
+export function assertGitHubApiUrl(value: string): void {
+  if (value !== GITHUB_API_URL) {
+    throw new GitHubConfigurationError(
+      "GitHub API origin must be the trusted public GitHub API.",
+      { field: "GITHUB_API_URL" },
+    );
+  }
 }

@@ -79,6 +79,8 @@ JSON string escaping, and rejects unsupported values. `hashReceiptSnapshot`
 calculates the lowercase SHA-256 digest of that canonical UTF-8 JSON. The
 receipt ID, publication time and revocation time are metadata and are not part
 of the snapshot hash, so equivalent projections produce the same hash.
+This is a tamper-evident integrity check for the snapshot, not a digital
+signature, publisher authentication, or non-repudiation mechanism.
 
 ## API Boundary
 

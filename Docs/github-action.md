@@ -83,7 +83,7 @@ No relevant introduced vulnerability produces `PASS`, zero paid requests, and th
 
 ## Evidence Flow
 
-1. Validate the `pull_request` or `pull_request_target` event and full base/head SHAs.
+1. Validate the `pull_request` event and full base/head SHAs.
 2. Retrieve and parse trusted base policy through the GitHub Contents API.
 3. Compare `baseSha...headSha` through the P4 Dependency Review client.
 4. Retry dependency snapshot warnings at most twice after the initial attempt, with deterministic short backoff. Exhaustion produces `REVIEW`.
@@ -115,42 +115,9 @@ Normal `pull_request` workflows from forks do not receive repository secrets. A 
 
 Do not weaken this behavior by treating a missing payment key as `PASS`. Use a trusted maintainer workflow or an explicit protected environment if automatic paid evaluation is required.
 
-## `pull_request_target` Warning
+## Event Contract
 
-`pull_request_target` is privileged. Never checkout or execute untrusted pull-request head code in the same privileged job that has access to Limen's Telegraph payment credential. Limen's Action itself uses only event metadata and GitHub REST APIs, but surrounding workflow steps must preserve that boundary.
-
-If maintainers intentionally use `pull_request_target` for trusted automated PRs such as Dependabot, restrict automatic execution to trusted actors such as `OWNER`, `MEMBER`, `COLLABORATOR`, or `dependabot[bot]`, or require a protected GitHub Environment/manual approval for external contributors. Keep `contents: read`, load policy from the base SHA, do not interpolate PR-controlled strings into shell, and never add a checkout or install step.
-
-A hardened advanced workflow can gate the privileged event before the Action receives secrets:
-
-```yaml
-name: Limen trusted PR check
-
-on:
-  pull_request_target:
-    types: [opened, synchronize, reopened]
-
-permissions:
-  contents: read
-
-jobs:
-  limen:
-    if: >-
-      github.actor == 'dependabot[bot]' ||
-      github.event.pull_request.author_association == 'OWNER' ||
-      github.event.pull_request.author_association == 'MEMBER' ||
-      github.event.pull_request.author_association == 'COLLABORATOR'
-    runs-on: ubuntu-latest
-    environment: limen-paid
-    steps:
-      - uses: kaelah971/limen@8688a0ec967e6e2bbc10d1464456acedc96cfe6b
-        with:
-          github-token: ${{ github.token }}
-          telegraph-private-key: ${{ secrets.LIMEN_TELEGRAPH_PRIVATE_KEY }}
-          telegraph-engine-url: ${{ vars.TELEGRAPH_ENGINE_URL }}
-```
-
-The environment should require maintainer approval when the repository's trust model does not permit automatic spending. This workflow still contains no checkout and no target-code execution.
+The Action supports `pull_request` only and rejects `pull_request_target`. This keeps the public contract on the safer event without asking consuming repositories to reproduce actor checks, protected environments, or privileged workflow policy. Normal fork pull requests without payment secrets fail closed to `REVIEW` when a paid lookup is required.
 
 ## Build And Scope
 

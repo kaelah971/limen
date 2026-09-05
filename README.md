@@ -29,7 +29,7 @@ jobs:
 
 Use the current immutable Action reference `kaelah971/limen@8688a0ec967e6e2bbc10d1464456acedc96cfe6b`. Set the `TELEGRAPH_ENGINE_URL` GitHub Variable to `http://13.237.89.59:7044/engine/v1/ask` for the currently validated Telegraph testnet Engine route. This endpoint is current setup infrastructure, not permanent production infrastructure.
 
-See [`Docs/github-action.md`](Docs/github-action.md) for installation, inputs, outputs, fork behavior, and hardened `pull_request_target` guidance. A complete workflow is at [`examples/github-actions/limen.yml`](examples/github-actions/limen.yml). The public onboarding page is available at `/setup`.
+See [`Docs/github-action.md`](Docs/github-action.md) for installation, inputs, outputs, fork behavior, and the supported `pull_request` contract. A complete workflow is at [`examples/github-actions/limen.yml`](examples/github-actions/limen.yml). The public onboarding page is available at `/setup`.
 
 ## Policy
 

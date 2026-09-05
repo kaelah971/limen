@@ -11,12 +11,17 @@ import {
   TelegraphNormalizationError,
   TelegraphPaymentError,
   TelegraphResponseError,
+  ConfigurationError,
   isLimenError,
   redactString,
 } from "../../core/src/index";
 import { assertExpectedNetwork, networksMatch, normalizeNetwork } from "./network";
+import { assertTelegraphEngineUrl } from "./config";
 import {
   assertSuccessfulEngineResponse,
+  assertPaymentRequirement,
+  parsePaymentAmount,
+  reservePaymentAmount,
   validatePaymentChallenge,
   verifyEngineIntent,
 } from "./schemas";
@@ -28,14 +33,31 @@ import type {
   TelegraphConfig,
   TelegraphPaymentAdapter,
   PaymentPreparationInput,
+  PaymentAuthorizationState,
 } from "./types";
 
 const TELEGRAPH_CHALLENGE_MAX_ATTEMPTS = 2;
+const MAX_RESPONSE_BODY_BYTES = 2 * 1024 * 1024;
+
+function assertResponseBodySize(response: Response): void {
+  const contentLength = response.headers?.get("content-length");
+  if (contentLength === null || contentLength === undefined) {
+    return;
+  }
+
+  const parsedLength = Number(contentLength);
+  if (!Number.isFinite(parsedLength) || parsedLength > MAX_RESPONSE_BODY_BYTES) {
+    throw new TelegraphEngineError("The Telegraph Engine response body is too large.", {
+      reason: "response_too_large",
+    });
+  }
+}
 
 export interface TelegraphEngineClientOptions {
   config: TelegraphConfig;
   fetch?: typeof fetch;
   paymentAdapter?: TelegraphPaymentAdapter;
+  paymentAuthorizationState?: PaymentAuthorizationState;
   now?: () => Date;
 }
 
@@ -51,6 +73,7 @@ async function readResponseBody(
 ): Promise<unknown> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
+    assertResponseBodySize(response);
     const text = await Promise.race([
       response.text(),
       new Promise<string>((_, reject) => {
@@ -65,6 +88,11 @@ async function readResponseBody(
     ]);
     if (text.trim() === "") {
       return undefined;
+    }
+    if (Buffer.byteLength(text, "utf8") > MAX_RESPONSE_BODY_BYTES) {
+      throw new TelegraphEngineError("The Telegraph Engine response body is too large.", {
+        reason: "response_too_large",
+      });
     }
     try {
       return JSON.parse(text) as unknown;
@@ -100,7 +128,11 @@ async function fetchWithTimeout(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetchImpl(url, { ...init, signal: controller.signal });
+    const response = await fetchImpl(url, {
+      ...init,
+      redirect: "error",
+      signal: controller.signal,
+    });
     if (controller.signal.aborted) {
       throw new TelegraphEngineError(
         "The Telegraph Engine request timed out.",
@@ -148,12 +180,27 @@ export class TelegraphEngineClient implements TelegraphClient {
   private readonly paymentAdapter: TelegraphPaymentAdapter;
   private readonly now: () => Date;
   private readonly config: TelegraphConfig;
+  private readonly paymentAuthorizationState: PaymentAuthorizationState;
 
   constructor(options: TelegraphEngineClientOptions) {
+    try {
+      assertTelegraphEngineUrl(options.config.engineUrl);
+    } catch (error) {
+      if (error instanceof ConfigurationError) {
+        throw error;
+      }
+      throw new ConfigurationError("Telegraph Engine configuration is invalid.");
+    }
     this.config = options.config;
     this.fetchImpl = options.fetch ?? fetch;
+    this.paymentAuthorizationState = options.paymentAuthorizationState ?? {
+      authorizedAmountBaseUnits: BigInt(0),
+    };
     this.paymentAdapter =
-      options.paymentAdapter ?? createOfficialX402PaymentAdapter(options.config);
+      options.paymentAdapter ?? createOfficialX402PaymentAdapter(
+        options.config,
+        this.paymentAuthorizationState,
+      );
     this.now = options.now ?? (() => new Date());
   }
 
@@ -232,6 +279,21 @@ export class TelegraphEngineClient implements TelegraphClient {
         { scheme: payment.scheme },
       );
     }
+    const preparedAmount = parsePaymentAmount(payment.amount);
+    if (payment.spendReserved &&
+        this.paymentAuthorizationState.authorizedAmountBaseUnits < preparedAmount) {
+      throw new TelegraphPaymentError("Telegraph payment authorization state is invalid.");
+    }
+    const amount = assertPaymentRequirement(
+      payment,
+      this.config.expectedNetwork,
+      payment.spendReserved
+        ? this.paymentAuthorizationState.authorizedAmountBaseUnits - preparedAmount
+        : this.paymentAuthorizationState.authorizedAmountBaseUnits,
+    );
+    if (!payment.spendReserved) {
+      reservePaymentAmount(this.paymentAuthorizationState, amount);
+    }
 
     let paidResponse: Response;
     let responseBody: unknown;
@@ -309,14 +371,23 @@ export function createTelegraphClient(
 
 export function createOfficialX402PaymentAdapter(
   config: Pick<TelegraphConfig, "privateKey" | "expectedNetwork">,
+  paymentAuthorizationState: PaymentAuthorizationState = {
+    authorizedAmountBaseUnits: BigInt(0),
+  },
 ): TelegraphPaymentAdapter {
   const account = privateKeyToAccount(config.privateKey as `0x${string}`);
   const expectedNetwork = normalizeNetwork(config.expectedNetwork) as Network;
+  let selectedRequirement: Awaited<ReturnType<typeof validatePaymentChallenge>> | undefined;
   const paymentClient = new x402Client((_version, requirements) => {
     const matchingRequirement = requirements.find(
       (requirement) =>
-        requirement.scheme === "exact" &&
-        networksMatch(requirement.network, expectedNetwork),
+        selectedRequirement !== undefined &&
+        requirement.scheme === selectedRequirement.scheme &&
+        networksMatch(requirement.network, selectedRequirement.network) &&
+        requirement.asset.toLowerCase() === selectedRequirement.asset.toLowerCase() &&
+        requirement.amount === selectedRequirement.amount &&
+        requirement.payTo.toLowerCase() === selectedRequirement.payTo.toLowerCase() &&
+        requirement.maxTimeoutSeconds === selectedRequirement.maxTimeoutSeconds,
     );
     if (!matchingRequirement) {
       throw new Error("No exact payment requirement matched the expected network.");
@@ -348,6 +419,12 @@ export function createOfficialX402PaymentAdapter(
         challenge,
         input.expectedNetwork,
       );
+      const amount = assertPaymentRequirement(
+        selected,
+        input.expectedNetwork,
+        paymentAuthorizationState.authorizedAmountBaseUnits,
+      );
+      selectedRequirement = selected;
 
       let payload;
       try {
@@ -370,6 +447,7 @@ export function createOfficialX402PaymentAdapter(
           "The x402 client did not return a payment signature header.",
         );
       }
+      reservePaymentAmount(paymentAuthorizationState, amount);
 
       return {
         headers: { "PAYMENT-SIGNATURE": paymentSignature },
@@ -377,6 +455,9 @@ export function createOfficialX402PaymentAdapter(
         scheme: selected.scheme,
         amount: selected.amount,
         asset: selected.asset,
+        payTo: selected.payTo,
+        maxTimeoutSeconds: selected.maxTimeoutSeconds,
+        spendReserved: true,
         costUsd: null,
       };
     },

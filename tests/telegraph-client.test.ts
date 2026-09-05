@@ -1,12 +1,16 @@
-import { describe, expect, it } from "vitest";
-import { TelegraphEngineClient } from "../packages/telegraph/src";
+import { describe, expect, it, vi } from "vitest";
+import {
+  BASE_SEPOLIA_USDC_ASSET,
+  createOfficialX402PaymentAdapter,
+  TelegraphEngineClient,
+} from "../packages/telegraph/src";
 import type {
   TelegraphConfig,
   TelegraphPaymentAdapter,
 } from "../packages/telegraph/src";
 
 const config: TelegraphConfig = {
-  engineUrl: "https://engine.example.test/v1/ask",
+  engineUrl: "http://13.237.89.59:7044/engine/v1/ask",
   privateKey: "test-only-placeholder",
   expectedNetwork: "eip155:84532",
   timeoutMs: 5000,
@@ -19,10 +23,12 @@ function createPaymentAdapter(
     preparePayment: async () => ({
       headers: { "PAYMENT-SIGNATURE": "test-signature" },
       network: "eip155:84532",
-      scheme: "exact",
-      amount: "10000",
-      asset: "test-asset",
-      costUsd: 0.01,
+       scheme: "exact",
+       amount: "10000",
+       asset: "0x036CbD53842c5426634e7929541eC2318f3DCf7e",
+       payTo: "0x0000000000000000000000000000000000000002",
+       maxTimeoutSeconds: 60,
+       costUsd: 0.01,
       ...overrides,
     }),
   };
@@ -62,6 +68,37 @@ function hangingResponse(status: number): Response {
     status,
     text: () => new Promise<string>(() => undefined),
   } as unknown as Response;
+}
+
+function officialChallenge(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    x402Version: 2,
+    resource: {
+      url: config.engineUrl,
+      description: "Test CVE lookup",
+      mimeType: "application/json",
+    },
+    accepts: [{
+      scheme: "exact",
+      network: "eip155:84532",
+      asset: BASE_SEPOLIA_USDC_ASSET,
+      amount: "10000",
+      payTo: "0x0000000000000000000000000000000000000002",
+      maxTimeoutSeconds: 60,
+      extra: {},
+      ...overrides,
+    }],
+  };
+}
+
+function officialChallengeEnvelope(
+  requirementOverrides: Record<string, unknown> = {},
+  envelopeOverrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    ...officialChallenge(requirementOverrides),
+    ...envelopeOverrides,
+  };
 }
 
 describe("TelegraphEngineClient", () => {
@@ -123,6 +160,62 @@ describe("TelegraphEngineClient", () => {
     await expect(client.lookupCve({ cveId: "CVE-2021-23337" })).rejects.toMatchObject({
       code: "UNEXPECTED_NETWORK",
     });
+  });
+
+  it.each([
+    ["malformed recipient", { payTo: "not-an-address" }],
+    ["unexpected asset", { asset: "0x0000000000000000000000000000000000000001" }],
+    ["absurd amount", { amount: "999999999999999999999999" }],
+    ["excessive timeout", { maxTimeoutSeconds: 121 }],
+  ])("does not issue a paid request for an invalid official challenge: %s", async (_label, overrides) => {
+    const { calls } = createClient([
+      new Response(JSON.stringify(officialChallenge(overrides)), { status: 402 }),
+    ], createOfficialX402PaymentAdapter({
+      privateKey: `0x${"1".repeat(64)}`,
+      expectedNetwork: "eip155:84532",
+    }));
+
+    const client = new TelegraphEngineClient({
+      config,
+      fetch: async (input, init) => {
+        calls.push({ input, init });
+        return new Response(JSON.stringify(officialChallenge(overrides)), { status: 402 });
+      },
+      paymentAdapter: createOfficialX402PaymentAdapter({
+        privateKey: `0x${"1".repeat(64)}`,
+        expectedNetwork: "eip155:84532",
+      }),
+    });
+
+    await expect(client.lookupCve({ cveId: "CVE-2021-23337" })).rejects.toMatchObject({
+      code: "TELEGRAPH_CHALLENGE_ERROR",
+    });
+    expect(calls).toHaveLength(1);
+    expect(new Headers(calls[0]?.init?.headers).get("PAYMENT-SIGNATURE")).toBeNull();
+  });
+
+  it.each([
+    ["wrong x402 version", officialChallengeEnvelope({}, { x402Version: 1 }), "TELEGRAPH_CHALLENGE_ERROR"],
+    ["wrong network", officialChallengeEnvelope({ network: "eip155:1" }), "TELEGRAPH_CHALLENGE_ERROR"],
+    ["unsupported scheme", officialChallengeEnvelope({ scheme: "upto" }), "TELEGRAPH_CHALLENGE_ERROR"],
+  ])("does not issue a paid request for %s", async (_label, challenge, code) => {
+    const calls: { input: RequestInfo | URL; init?: RequestInit }[] = [];
+    const adapter = createOfficialX402PaymentAdapter({
+      privateKey: `0x${"1".repeat(64)}`,
+      expectedNetwork: "eip155:84532",
+    });
+    const client = new TelegraphEngineClient({
+      config,
+      fetch: async (input, init) => {
+        calls.push({ input, init });
+        return new Response(JSON.stringify(challenge), { status: 402 });
+      },
+      paymentAdapter: adapter,
+    });
+
+    await expect(client.lookupCve({ cveId: "CVE-2021-23337" })).rejects.toMatchObject({ code });
+    expect(calls).toHaveLength(1);
+    expect(new Headers(calls[0]?.init?.headers).get("PAYMENT-SIGNATURE")).toBeNull();
   });
 
   it("does not treat a repeated challenge as a successful paid result", async () => {
@@ -253,6 +346,64 @@ describe("TelegraphEngineClient", () => {
     });
     expect(calls).toHaveLength(2);
     expect((calls[1]?.init?.signal as AbortSignal).aborted).toBe(false);
+  });
+
+  it("rejects Engine redirects without issuing a second request", async () => {
+    const { client, calls } = createClient([
+      new Response("", {
+        status: 302,
+        headers: { location: "https://attacker.example/collect" },
+      }),
+    ]);
+
+    await expect(client.lookupCve({ cveId: "CVE-2021-23337" })).rejects.toMatchObject({
+      code: "TELEGRAPH_ENGINE_ERROR",
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.init?.redirect).toBe("error");
+  });
+
+  it("rejects an oversized challenge before reading provider-controlled content", async () => {
+    const text = vi.fn(async () => "never-read");
+    const response = {
+      status: 402,
+      headers: new Headers({ "content-length": String(2 * 1024 * 1024 + 1) }),
+      text,
+    } as unknown as Response;
+    const { client } = createClient([response]);
+
+    await expect(client.lookupCve({ cveId: "CVE-2021-23337" })).rejects.toMatchObject({
+      code: "TELEGRAPH_ENGINE_ERROR",
+      details: { reason: "response_too_large" },
+    });
+    expect(text).not.toHaveBeenCalled();
+  });
+
+  it("enforces the run-local payment ceiling before a paid request", async () => {
+    const responseBody = JSON.stringify({
+      intent: "CVE_LOOKUP",
+      cve_id: "CVE-2021-23337",
+    });
+    const responses = Array.from({ length: 11 }, (_, index) =>
+      index % 2 === 0
+        ? new Response("", { status: 402 })
+        : new Response(responseBody, { status: 200 }),
+    );
+    const { client, calls } = createClient(
+      responses,
+      createPaymentAdapter({ amount: "50000" }),
+    );
+
+    for (let index = 0; index < 5; index += 1) {
+      await expect(client.lookupCve({ cveId: "CVE-2021-23337" })).resolves.toMatchObject({
+        cveId: "CVE-2021-23337",
+      });
+    }
+    await expect(client.lookupCve({ cveId: "CVE-2021-23337" })).rejects.toMatchObject({
+      code: "TELEGRAPH_CHALLENGE_ERROR",
+    });
+    expect(calls).toHaveLength(11);
+    expect(new Headers(calls[10]?.init?.headers).get("PAYMENT-SIGNATURE")).toBeNull();
   });
 
   it("does not retry a non-timeout unpaid challenge transport failure", async () => {

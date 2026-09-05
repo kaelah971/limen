@@ -60,6 +60,12 @@ export {
 export { redactSecrets, redactString } from "./observability/redact";
 
 export {
+  LOCAL_HOSTS,
+  parseOutboundUrl,
+  type OutboundUrlPolicy,
+} from "./network/outbound";
+
+export {
   createObservabilityLogger,
   LimenObservabilityEventSchema,
   LimenObservabilityStageSchema,
