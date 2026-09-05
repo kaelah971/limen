@@ -1,0 +1,137 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 930" role="img" aria-labelledby="title desc">
+  <title id="title">Limen evidence and decision architecture</title>
+  <desc id="desc">A pull request flows through repository evidence, routed Telegraph CVE evidence, and limen.yml policy before Limen returns PASS, HOLD, or REVIEW. An optional separate ledger creates a sanitized public receipt.</desc>
+  <defs>
+    <linearGradient id="header" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#1f1f23"/>
+      <stop offset="1" stop-color="#4c1d95"/>
+    </linearGradient>
+    <pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse">
+      <path d="M 28 0 L 0 0 0 28" fill="none" stroke="#e5e5ea" stroke-width="1"/>
+    </pattern>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="5" stdDeviation="8" flood-color="#1f1f23" flood-opacity=".1"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7c3aed"/>
+    </marker>
+    <marker id="muted-arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#a1a1aa"/>
+    </marker>
+    <style>
+      .title { font: 700 29px Inter, Arial, sans-serif; fill: #ffffff; letter-spacing: -.4px; }
+      .subtitle { font: 400 14px Inter, Arial, sans-serif; fill: #e9d5ff; }
+      .section { font: 700 13px "IBM Plex Mono", Consolas, monospace; fill: #71717a; letter-spacing: 1.4px; }
+      .card-title { font: 700 17px Inter, Arial, sans-serif; fill: #1f1f23; }
+      .card-title-inverse { font: 700 17px Inter, Arial, sans-serif; fill: #ffffff; }
+      .card-copy { font: 400 13px Inter, Arial, sans-serif; fill: #52525b; }
+      .card-copy-inverse { font: 400 13px Inter, Arial, sans-serif; fill: #e4e4e7; }
+      .mono { font: 500 12px "IBM Plex Mono", Consolas, monospace; fill: #5b21b6; }
+      .mono-cyan { font: 500 12px "IBM Plex Mono", Consolas, monospace; fill: #67c6f0; }
+      .output { font: 700 17px "IBM Plex Mono", Consolas, monospace; }
+      .small { font: 400 12px Inter, Arial, sans-serif; fill: #71717a; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="930" fill="#ffffff"/>
+  <rect x="24" y="24" width="1152" height="882" rx="20" fill="url(#grid)"/>
+  <rect x="24" y="24" width="1152" height="118" rx="20" fill="url(#header)"/>
+  <path d="M24 122 Q600 170 1176 122 L1176 142 L24 142 Z" fill="#4c1d95" opacity=".18"/>
+  <text x="62" y="70" class="title">Limen evidence gate</text>
+  <text x="62" y="101" class="subtitle">Repository context + routed CVE evidence + trusted policy = deterministic release decision</text>
+  <text x="1085" y="74" text-anchor="end" class="mono-cyan">PULL REQUEST FLOW</text>
+
+  <text x="62" y="181" class="section">EVIDENCE COLLECTION</text>
+
+  <g filter="url(#shadow)">
+    <rect x="62" y="207" width="240" height="96" rx="14" fill="#ffffff" stroke="#c4b5fd" stroke-width="2"/>
+    <circle cx="92" cy="238" r="15" fill="#c4b5fd"/>
+    <text x="92" y="243" text-anchor="middle" class="card-title">1</text>
+    <text x="120" y="239" class="card-title">Pull request</text>
+    <text x="86" y="267" class="card-copy">Base SHA, head SHA,</text>
+    <text x="86" y="286" class="card-copy">repository and event metadata</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="342" y="207" width="240" height="96" rx="14" fill="#ffffff" stroke="#60a5fa" stroke-width="2"/>
+    <circle cx="372" cy="238" r="15" fill="#60a5fa"/>
+    <text x="372" y="243" text-anchor="middle" class="card-title">2</text>
+    <text x="400" y="239" class="card-title">GitHub evidence</text>
+    <text x="366" y="267" class="card-copy">Dependency Review, Dependabot,</text>
+    <text x="366" y="286" class="card-copy">advisory and exposure facts</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="622" y="207" width="240" height="96" rx="14" fill="#ffffff" stroke="#a78bfa" stroke-width="2"/>
+    <circle cx="652" cy="238" r="15" fill="#a78bfa"/>
+    <text x="652" y="243" text-anchor="middle" class="card-title">3</text>
+    <text x="680" y="239" class="card-title">Relevant CVEs</text>
+    <text x="646" y="267" class="card-copy">Unique active findings are</text>
+    <text x="646" y="286" class="card-copy">bounded and routed once</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="902" y="207" width="240" height="96" rx="14" fill="#ffffff" stroke="#7c3aed" stroke-width="2"/>
+    <circle cx="932" cy="238" r="15" fill="#7c3aed"/>
+    <text x="932" y="243" text-anchor="middle" class="card-title-inverse">4</text>
+    <text x="960" y="239" class="card-title">Telegraph</text>
+    <text x="926" y="267" class="card-copy">CVE_LOOKUP routed evidence</text>
+    <text x="926" y="286" class="card-copy">and Miner provenance</text>
+  </g>
+
+  <path d="M302 255 H334" fill="none" stroke="#7c3aed" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M582 255 H614" fill="none" stroke="#7c3aed" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M862 255 H894" fill="none" stroke="#7c3aed" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <g filter="url(#shadow)">
+    <rect x="292" y="348" width="616" height="102" rx="14" fill="#1f1f23"/>
+    <text x="600" y="383" text-anchor="middle" class="card-title-inverse">HTTP 402 / x402 payment</text>
+    <text x="600" y="409" text-anchor="middle" class="card-copy-inverse">Validate network, exact scheme, amount and recipient before payment</text>
+    <text x="600" y="431" text-anchor="middle" class="mono-cyan">Base Sepolia  |  payment signature  |  one bounded retry</text>
+  </g>
+  <path d="M1022 303 V328 H600 V340" fill="none" stroke="#7c3aed" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <g filter="url(#shadow)">
+    <rect x="292" y="493" width="616" height="88" rx="14" fill="#ffffff" stroke="#7c3aed" stroke-width="2"/>
+    <text x="600" y="529" text-anchor="middle" class="card-title">Routed CVE evidence</text>
+    <text x="600" y="554" text-anchor="middle" class="card-copy">Intent, severity, provenance, cost, latency and uncertainty enter the decision boundary</text>
+  </g>
+  <path d="M600 450 V485" fill="none" stroke="#7c3aed" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <text x="62" y="626" class="section">DECISION AUTHORITY</text>
+  <g filter="url(#shadow)">
+    <rect x="62" y="650" width="270" height="106" rx="14" fill="#ffffff" stroke="#8b5cf6" stroke-width="2"/>
+    <text x="86" y="687" class="card-title">limen.yml policy</text>
+    <text x="86" y="713" class="card-copy">Loaded from the trusted base SHA.</text>
+    <text x="86" y="733" class="card-copy">Defines blocked scope and uncertainty.</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="386" y="650" width="428" height="106" rx="14" fill="#1f1f23"/>
+    <text x="600" y="687" text-anchor="middle" class="card-title-inverse">Deterministic Limen decision</text>
+    <text x="600" y="713" text-anchor="middle" class="card-copy-inverse">Repository evidence + Telegraph evidence + policy</text>
+    <text x="600" y="736" text-anchor="middle" class="mono-cyan">HOLD &gt; REVIEW &gt; PASS</text>
+  </g>
+  <path d="M600 581 V642" fill="none" stroke="#7c3aed" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M332 703 H378" fill="none" stroke="#7c3aed" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <g>
+    <rect x="852" y="650" width="290" height="106" rx="14" fill="#ffffff" stroke="#d4d4d8" stroke-width="2"/>
+    <text x="876" y="684" class="section">RELEASE OUTPUT</text>
+    <text x="876" y="714" class="output" fill="#166534">PASS</text>
+    <text x="947" y="714" class="output" fill="#9a3412">HOLD</text>
+    <text x="1027" y="714" class="output" fill="#5b21b6">REVIEW</text>
+    <text x="876" y="738" class="small">Workflow success, block, or fail-closed</text>
+  </g>
+  <path d="M814 703 H844" fill="none" stroke="#7c3aed" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <g>
+    <rect x="62" y="811" width="1080" height="64" rx="14" fill="#fafafa" stroke="#d4d4d8" stroke-width="2" stroke-dasharray="7 6"/>
+    <text x="86" y="837" class="section">OPTIONAL / SEPARATE FROM RELEASE AUTHORITY</text>
+    <text x="86" y="859" class="card-copy">Durable ledger persistence</text>
+    <path d="M286 843 H340" fill="none" stroke="#a1a1aa" stroke-width="2" marker-end="url(#muted-arrow)"/>
+    <text x="362" y="859" class="card-copy">sanitized allowlist projection</text>
+    <path d="M584 843 H638" fill="none" stroke="#a1a1aa" stroke-width="2" marker-end="url(#muted-arrow)"/>
+    <text x="660" y="859" class="card-copy">public receipt + SHA-256 integrity hash</text>
+    <text x="1084" y="859" text-anchor="end" class="small">does not decide release</text>
+  </g>
+</svg>
