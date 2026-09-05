@@ -548,6 +548,59 @@ describe("P3 orchestration", () => {
     });
   });
 
+  it("preserves HOLD precedence across mixed multi-CVE partial failures", async () => {
+    const changes = [
+      makeChange(1, { severity: "high" }),
+      makeChange(2, { severity: "low" }),
+      makeChange(3, { severity: "low" }),
+      makeChange(4, { severity: "low" }),
+      makeChange(5, { severity: "low" }),
+    ];
+    const advisories = changes.map((change, index) => [
+      change.vulnerabilities[0]?.advisory_ghsa_id ?? "",
+      makeAdvisory(index + 1, { severity: index === 0 ? "high" : "low" }),
+    ] as const);
+    const github = makeGitHubClient(
+      changes,
+      new Map(advisories),
+    );
+    const lookupCve = vi.fn().mockImplementation(({ cveId }: { cveId: string }) =>
+      cveId === "CVE-2024-0001"
+        ? Promise.resolve(makeTelegraphEvidence(cveId, "HIGH"))
+        : cveId === "CVE-2024-0002"
+          ? Promise.reject(new TelegraphEngineError("lookup timed out", { reason: "timeout" }))
+          : cveId === "CVE-2024-0003"
+            ? Promise.resolve(makeTelegraphEvidence(cveId, "CRITICAL"))
+            : Promise.resolve(makeTelegraphEvidence(cveId, "LOW")));
+
+    const result = await orchestrateLimenRun({
+      context: actionContext,
+      policy,
+      maxLookups: 4,
+      dependencies: {
+        githubClient: github,
+        telegraphClientFactory: () => ({ lookupCve }),
+      },
+    });
+
+    expect(result.overallDecision).toBe("HOLD");
+    expect(result.skippedCves).toEqual(["CVE-2024-0005"]);
+    expect(result.decisions).toHaveLength(4);
+    expect(result.decisions.map((decision) => [decision.cveId, decision.decision, decision.reasonCode])).toEqual([
+      ["CVE-2024-0001", "HOLD", "AFFECTED_BLOCKING_DEPENDENCY"],
+      ["CVE-2024-0002", "REVIEW", "TELEGRAPH_UNAVAILABLE"],
+      ["CVE-2024-0003", "REVIEW", "SEVERITY_CONFLICT"],
+      ["CVE-2024-0004", "PASS", "NO_BLOCKING_CONDITION"],
+    ]);
+    expect(result.telegraphRequests.map((request) => request.cveId)).toEqual([
+      "CVE-2024-0001",
+      "CVE-2024-0002",
+      "CVE-2024-0003",
+      "CVE-2024-0004",
+    ]);
+    expect(lookupCve).toHaveBeenCalledTimes(4);
+  });
+
   it("deduplicates the paid lookup while evaluating every canonical evidence pair", async () => {
     const first = makeChange(1, { name: "package-a" });
     const second = makeChange(1, { name: "package-b" });

@@ -64,6 +64,21 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
   response.end(serialized);
 }
 
+function handleUnhandledRequestError(response: ServerResponse): void {
+  if (response.headersSent) {
+    response.destroy();
+    return;
+  }
+  try {
+    sendJson(response, 500, {
+      code: "LEDGER_INTERNAL_ERROR",
+      message: "The evidence ledger request failed.",
+    });
+  } catch {
+    response.destroy();
+  }
+}
+
 function routeTemplate(request: IncomingMessage): string {
   try {
     const path = requestPath(request);
@@ -349,6 +364,8 @@ export function createLedgerServer(options: LedgerServerOptions): Server {
     }),
   };
   return createServer((request, response) => {
-    void handleRequest(request, response, resolvedOptions);
+    void handleRequest(request, response, resolvedOptions).catch(() => {
+      handleUnhandledRequestError(response);
+    });
   });
 }

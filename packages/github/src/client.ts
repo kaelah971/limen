@@ -5,6 +5,7 @@ import {
   GitHubAuthError,
   GitHubConfigurationError,
   GitHubDependencySnapshotWarningError,
+  GitHubError,
   GitHubPermissionError,
   GitHubRateLimitError,
   GitHubResponseError,
@@ -114,8 +115,29 @@ function responseMetadata(response: Response): GitHubResponseMetadata {
   };
 }
 
-async function readBody(response: Response): Promise<unknown> {
-  const text = await response.text();
+async function readBody(
+  response: Response,
+  timeoutMs: number,
+  operation: string,
+  onTimeout?: () => void,
+): Promise<unknown> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const text = await Promise.race([
+    response.text(),
+    new Promise<string>((_, reject) => {
+      timeout = setTimeout(() => {
+        onTimeout?.();
+        reject(new GitHubApiError(
+          "The GitHub API response body timed out.",
+          { operation, reason: "timeout" },
+        ));
+      }, timeoutMs);
+    }),
+  ]).finally(() => {
+    if (timeout !== undefined) {
+      clearTimeout(timeout);
+    }
+  });
   if (text.trim() === "") {
     return undefined;
   }
@@ -166,9 +188,8 @@ export class GitHubClientImpl implements GitHubClient {
   ): Promise<GitHubApiResult<T>> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs);
-    let response: Response;
     try {
-      response = await this.fetchImpl(`${this.config.apiUrl}${path}`, {
+      const response = await this.fetchImpl(`${this.config.apiUrl}${path}`, {
         method: "GET",
         headers: {
           accept: "application/vnd.github+json",
@@ -179,70 +200,81 @@ export class GitHubClientImpl implements GitHubClient {
         },
         signal: controller.signal,
       });
+      if (controller.signal.aborted) {
+        throw new GitHubApiError(
+          "The GitHub API request timed out.",
+          { operation, reason: "timeout" },
+        );
+      }
+      const metadata = responseMetadata(response);
+      const body = await readBody(
+        response,
+        this.config.timeoutMs,
+        operation,
+        () => controller.abort(),
+      );
+      if (response.status < 200 || response.status >= 300) {
+        if (response.status === 401) {
+          throw new GitHubAuthError("GitHub rejected the supplied credentials.", {
+            ...errorDetails(metadata),
+            operation,
+          });
+        }
+        if (
+          response.status === 429 ||
+          (response.status === 403 && metadata.rateLimit.remaining === 0)
+        ) {
+          throw new GitHubRateLimitError("GitHub API rate limit was reached.", {
+            ...errorDetails(metadata),
+            operation,
+          });
+        }
+        if (response.status === 403) {
+          throw new GitHubPermissionError(
+            "GitHub denied access to the requested resource.",
+            { ...errorDetails(metadata), operation },
+          );
+        }
+        if (response.status === 404 && advisoryNotFound) {
+          throw new GitHubAdvisoryNotFoundError(
+            "GitHub could not find the requested global advisory.",
+            { ...errorDetails(metadata), operation },
+          );
+        }
+        throw new GitHubApiError("GitHub returned an unsuccessful API response.", {
+          ...errorDetails(metadata),
+          operation,
+          bodyType: bodyType(body),
+        });
+      }
+
+      const parsed = schema.safeParse(body);
+      if (!parsed.success) {
+        throw new GitHubResponseError(
+          "GitHub returned a response with an unexpected shape.",
+          {
+            ...errorDetails(metadata),
+            operation,
+            issues: parsed.error.issues.map((issue) => ({
+              path: issue.path,
+              message: issue.message,
+            })),
+          },
+        );
+      }
+
+      return { data: parsed.data, metadata };
     } catch (error) {
+      if (error instanceof GitHubError) {
+        throw error;
+      }
       throw new GitHubApiError("The GitHub API request failed.", {
         operation,
-        reason: error instanceof Error && error.name === "AbortError"
-          ? "timeout"
-          : "network_error",
+        reason: controller.signal.aborted ? "timeout" : "network_error",
       });
     } finally {
       clearTimeout(timeout);
     }
-
-    const metadata = responseMetadata(response);
-    const body = await readBody(response);
-    if (response.status < 200 || response.status >= 300) {
-      if (response.status === 401) {
-        throw new GitHubAuthError("GitHub rejected the supplied credentials.", {
-          ...errorDetails(metadata),
-          operation,
-        });
-      }
-      if (
-        response.status === 429 ||
-        (response.status === 403 && metadata.rateLimit.remaining === 0)
-      ) {
-        throw new GitHubRateLimitError("GitHub API rate limit was reached.", {
-          ...errorDetails(metadata),
-          operation,
-        });
-      }
-      if (response.status === 403) {
-        throw new GitHubPermissionError(
-          "GitHub denied access to the requested resource.",
-          { ...errorDetails(metadata), operation },
-        );
-      }
-      if (response.status === 404 && advisoryNotFound) {
-        throw new GitHubAdvisoryNotFoundError(
-          "GitHub could not find the requested global advisory.",
-          { ...errorDetails(metadata), operation },
-        );
-      }
-      throw new GitHubApiError("GitHub returned an unsuccessful API response.", {
-        ...errorDetails(metadata),
-        operation,
-        bodyType: bodyType(body),
-      });
-    }
-
-    const parsed = schema.safeParse(body);
-    if (!parsed.success) {
-      throw new GitHubResponseError(
-        "GitHub returned a response with an unexpected shape.",
-        {
-          ...errorDetails(metadata),
-          operation,
-          issues: parsed.error.issues.map((issue) => ({
-            path: issue.path,
-            message: issue.message,
-          })),
-        },
-      );
-    }
-
-    return { data: parsed.data, metadata };
   }
 
   async compareDependencies(
@@ -313,13 +345,25 @@ export class GitHubClientImpl implements GitHubClient {
   ): Promise<GitHubApiResult<GitHubRepositoryFileDto>> {
     const owner = encodeURIComponent(requiredValue(input.owner, "owner"));
     const repo = encodeURIComponent(requiredValue(input.repo, "repo"));
-    const path = encodeRepositoryPath(input.path);
+    const requestedPath = requiredValue(input.path, "path");
+    const path = encodeRepositoryPath(requestedPath);
     const ref = encodeURIComponent(requiredValue(input.ref, "ref"));
-    return this.request(
+    const result = await this.request(
       `/repos/${owner}/${repo}/contents/${path}?ref=${ref}`,
       RepositoryFileSchema,
       "repository_file",
     );
+    if (result.data.path !== requestedPath) {
+      throw new GitHubResponseError(
+        "GitHub returned a different repository file than requested.",
+        {
+          operation: "repository_file",
+          expectedPath: requestedPath,
+          actualPath: result.data.path,
+        },
+      );
+    }
+    return result;
   }
 }
 

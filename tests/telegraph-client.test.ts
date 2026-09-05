@@ -31,6 +31,7 @@ function createPaymentAdapter(
 function createClient(
   responses: Response[],
   paymentAdapter: TelegraphPaymentAdapter = createPaymentAdapter(),
+  configOverrides: Partial<TelegraphConfig> = {},
 ) {
   const calls: { input: RequestInfo | URL; init?: RequestInit }[] = [];
   const fetchImpl: typeof fetch = async (input, init) => {
@@ -42,7 +43,7 @@ function createClient(
     return response;
   };
   const client = new TelegraphEngineClient({
-    config,
+    config: { ...config, ...configOverrides },
     fetch: fetchImpl,
     paymentAdapter,
     now: (() => {
@@ -54,6 +55,13 @@ function createClient(
     })(),
   });
   return { client, calls };
+}
+
+function hangingResponse(status: number): Response {
+  return {
+    status,
+    text: () => new Promise<string>(() => undefined),
+  } as unknown as Response;
 }
 
 describe("TelegraphEngineClient", () => {
@@ -118,7 +126,7 @@ describe("TelegraphEngineClient", () => {
   });
 
   it("does not treat a repeated challenge as a successful paid result", async () => {
-    const { client } = createClient([
+    const { client, calls } = createClient([
       new Response("", { status: 402 }),
       new Response("", { status: 402 }),
     ]);
@@ -126,6 +134,7 @@ describe("TelegraphEngineClient", () => {
     await expect(client.lookupCve({ cveId: "CVE-2021-23337" })).rejects.toMatchObject({
       code: "TELEGRAPH_PAYMENT_ERROR",
     });
+    expect(calls).toHaveLength(2);
   });
 
   it("classifies an unreadable paid result as a routing error", async () => {
@@ -159,5 +168,100 @@ describe("TelegraphEngineClient", () => {
     await expect(client.lookupCve({ cveId: "CVE-2021-23337" })).rejects.toMatchObject({
       code: "TELEGRAPH_ROUTING_ERROR",
     });
+  });
+
+  it("rejects paid evidence for a different CVE at the client boundary", async () => {
+    const { client } = createClient([
+      new Response("", { status: 402 }),
+      new Response(JSON.stringify({
+        intent: "CVE_LOOKUP",
+        cve_id: "CVE-2024-0001",
+      }), { status: 200 }),
+    ]);
+
+    await expect(client.lookupCve({ cveId: "CVE-2021-23337" })).rejects.toMatchObject({
+      code: "TELEGRAPH_RESPONSE_ERROR",
+      details: {
+        expectedCveId: "CVE-2021-23337",
+        actualCveId: "CVE-2024-0001",
+      },
+    });
+  });
+
+  it("bounds unpaid challenge timeout retries", async () => {
+    const { client, calls } = createClient(
+      [hangingResponse(402), hangingResponse(402)],
+      createPaymentAdapter(),
+      { timeoutMs: 10 },
+    );
+
+    await expect(client.lookupCve({ cveId: "CVE-2021-23337" })).rejects.toMatchObject({
+      code: "TELEGRAPH_ENGINE_ERROR",
+      details: { reason: "timeout" },
+    });
+    expect(calls).toHaveLength(2);
+    expect((calls[1]?.init?.signal as AbortSignal).aborted).toBe(true);
+  });
+
+  it("does not retry a paid request after its response body times out", async () => {
+    const { client, calls } = createClient(
+      [new Response("", { status: 402 }), hangingResponse(200)],
+      createPaymentAdapter(),
+      { timeoutMs: 10 },
+    );
+
+    await expect(client.lookupCve({ cveId: "CVE-2021-23337" })).rejects.toMatchObject({
+      code: "TELEGRAPH_ENGINE_ERROR",
+      details: { reason: "timeout" },
+    });
+    expect(calls).toHaveLength(2);
+    expect((calls[1]?.init?.signal as AbortSignal).aborted).toBe(true);
+  });
+
+  it("retries a timed-out unpaid challenge once and stops after a successful 402", async () => {
+    const { client, calls } = createClient(
+      [
+        hangingResponse(402),
+        new Response("", { status: 402 }),
+        new Response(JSON.stringify({
+          intent: "CVE_LOOKUP",
+          cve_id: "CVE-2021-23337",
+        }), { status: 200 }),
+      ],
+      createPaymentAdapter(),
+      { timeoutMs: 10 },
+    );
+
+    await expect(client.lookupCve({ cveId: "CVE-2021-23337" })).resolves.toMatchObject({
+      cveId: "CVE-2021-23337",
+    });
+    expect(calls).toHaveLength(3);
+    expect(new Headers(calls[0]?.init?.headers).get("PAYMENT-SIGNATURE")).toBeNull();
+    expect(new Headers(calls[1]?.init?.headers).get("PAYMENT-SIGNATURE")).toBeNull();
+    expect(new Headers(calls[2]?.init?.headers).get("PAYMENT-SIGNATURE")).toBe(
+      "test-signature",
+    );
+    expect((calls[0]?.init?.signal as AbortSignal).aborted).toBe(true);
+  });
+
+  it("does not retry a paid request after transport failure", async () => {
+    const { client, calls } = createClient([new Response("", { status: 402 })]);
+
+    await expect(client.lookupCve({ cveId: "CVE-2021-23337" })).rejects.toMatchObject({
+      code: "TELEGRAPH_ENGINE_ERROR",
+      details: { reason: "network_error" },
+    });
+    expect(calls).toHaveLength(2);
+    expect((calls[1]?.init?.signal as AbortSignal).aborted).toBe(false);
+  });
+
+  it("does not retry a non-timeout unpaid challenge transport failure", async () => {
+    const { client, calls } = createClient([]);
+
+    await expect(client.lookupCve({ cveId: "CVE-2021-23337" })).rejects.toMatchObject({
+      code: "TELEGRAPH_ENGINE_ERROR",
+      details: { reason: "network_error" },
+    });
+    expect(calls).toHaveLength(1);
   });
 });

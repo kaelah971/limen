@@ -30,6 +30,8 @@ import type {
   PaymentPreparationInput,
 } from "./types";
 
+const TELEGRAPH_CHALLENGE_MAX_ATTEMPTS = 2;
+
 export interface TelegraphEngineClientOptions {
   config: TelegraphConfig;
   fetch?: typeof fetch;
@@ -41,15 +43,51 @@ function isCveId(value: string): boolean {
   return /^CVE-\d{4}-\d{4,}$/i.test(value.trim());
 }
 
-async function readResponseBody(response: Response): Promise<unknown> {
-  const text = await response.text();
-  if (text.trim() === "") {
-    return undefined;
-  }
+async function readResponseBody(
+  response: Response,
+  timeoutMs: number,
+  signal?: AbortSignal,
+  onTimeout?: () => void,
+): Promise<unknown> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return text;
+    const text = await Promise.race([
+      response.text(),
+      new Promise<string>((_, reject) => {
+        timeout = setTimeout(() => {
+          onTimeout?.();
+          reject(new TelegraphEngineError(
+            "The Telegraph Engine response body timed out.",
+            { reason: "timeout" },
+          ));
+        }, timeoutMs);
+      }),
+    ]);
+    if (text.trim() === "") {
+      return undefined;
+    }
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      return text;
+    }
+  } catch (error) {
+    if (error instanceof TelegraphEngineError) {
+      throw error;
+    }
+    throw new TelegraphEngineError(
+      "The Telegraph Engine response body could not be read.",
+      {
+        reason: signal?.aborted ? "timeout" : "network_error",
+        ...(signal?.aborted
+          ? {}
+          : { cause: error instanceof Error ? redactString(error.message) : "unknown" }),
+      },
+    );
+  } finally {
+    if (timeout !== undefined) {
+      clearTimeout(timeout);
+    }
   }
 }
 
@@ -58,18 +96,43 @@ async function fetchWithTimeout(
   url: string,
   init: RequestInit,
   timeoutMs: number,
-): Promise<Response> {
+): Promise<{ response: Response; body: unknown }> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetchImpl(url, { ...init, signal: controller.signal });
+    const response = await fetchImpl(url, { ...init, signal: controller.signal });
+    if (controller.signal.aborted) {
+      throw new TelegraphEngineError(
+        "The Telegraph Engine request timed out.",
+        { reason: "timeout" },
+      );
+    }
+    const body = await readResponseBody(
+      response,
+      timeoutMs,
+      controller.signal,
+      () => controller.abort(),
+    );
+    return { response, body };
   } catch (error) {
+    if (error instanceof TelegraphEngineError) {
+      throw error;
+    }
     throw new TelegraphEngineError("The Telegraph Engine request failed.", {
-      cause: error instanceof Error ? redactString(error.message) : "unknown",
+      reason: error instanceof Error && error.name === "AbortError"
+        ? "timeout"
+        : "network_error",
+      ...(error instanceof Error && error.name === "AbortError"
+        ? {}
+        : { cause: error instanceof Error ? redactString(error.message) : "unknown" }),
     });
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function isTimeoutError(error: unknown): boolean {
+  return error instanceof TelegraphEngineError && error.details?.reason === "timeout";
 }
 
 function buildRequestBody(input: CveLookupInput): Record<string, unknown> {
@@ -110,15 +173,32 @@ export class TelegraphEngineClient implements TelegraphClient {
       body: JSON.stringify(request),
     };
 
-    const challengeResponse = await fetchWithTimeout(
-      this.fetchImpl,
-      this.config.engineUrl,
-      requestInit,
-      this.config.timeoutMs,
-    );
+    let challengeResponse: Response | undefined;
+    let challengeBody: unknown;
+    for (let attempt = 0; attempt < TELEGRAPH_CHALLENGE_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        const challenge = await fetchWithTimeout(
+          this.fetchImpl,
+          this.config.engineUrl,
+          requestInit,
+          this.config.timeoutMs,
+        );
+        challengeResponse = challenge.response;
+        challengeBody = challenge.body;
+        break;
+      } catch (error) {
+        if (!isTimeoutError(error) || attempt === TELEGRAPH_CHALLENGE_MAX_ATTEMPTS - 1) {
+          throw error;
+        }
+      }
+    }
+
+    if (challengeResponse === undefined) {
+      throw new TelegraphEngineError("Telegraph did not return a payment challenge.");
+    }
 
     if (challengeResponse.status !== 402) {
-      const body = await readResponseBody(challengeResponse);
+      const body = challengeBody;
       if (challengeResponse.status >= 200 && challengeResponse.status < 300) {
         throw new TelegraphChallengeError(
           "Telegraph returned evidence without an x402 payment challenge.",
@@ -131,7 +211,6 @@ export class TelegraphEngineClient implements TelegraphClient {
       });
     }
 
-    const challengeBody = await readResponseBody(challengeResponse);
     let payment: PreparedPayment;
     try {
       payment = await this.paymentAdapter.preparePayment({
@@ -155,8 +234,9 @@ export class TelegraphEngineClient implements TelegraphClient {
     }
 
     let paidResponse: Response;
+    let responseBody: unknown;
     try {
-      paidResponse = await fetchWithTimeout(
+      const paid = await fetchWithTimeout(
         this.fetchImpl,
         this.config.engineUrl,
         {
@@ -168,6 +248,8 @@ export class TelegraphEngineClient implements TelegraphClient {
         },
         this.config.timeoutMs,
       );
+      paidResponse = paid.response;
+      responseBody = paid.body;
     } catch (error) {
       if (isLimenError(error)) {
         throw error;
@@ -175,7 +257,6 @@ export class TelegraphEngineClient implements TelegraphClient {
       throw new TelegraphEngineError("The paid Telegraph Engine request failed.");
     }
 
-    const responseBody = await readResponseBody(paidResponse);
     if (paidResponse.status === 402) {
       throw new TelegraphPaymentError(
         "Telegraph did not accept the payment challenge response.",
@@ -191,7 +272,7 @@ export class TelegraphEngineClient implements TelegraphClient {
     verifyEngineIntent(responseBody);
 
     try {
-      return normalizeTelegraphEvidence(responseBody, {
+      const evidence = normalizeTelegraphEvidence(responseBody, {
         requestedAt,
         receivedAt: this.now().toISOString(),
         payment: {
@@ -200,8 +281,16 @@ export class TelegraphEngineClient implements TelegraphClient {
           costUsd: payment.costUsd,
         },
       });
+      const requestedCveId = input.cveId.trim().toUpperCase();
+      if (evidence.cveId !== null && evidence.cveId !== requestedCveId) {
+        throw new TelegraphResponseError(
+          "Telegraph returned evidence for a different CVE.",
+          { expectedCveId: requestedCveId, actualCveId: evidence.cveId },
+        );
+      }
+      return evidence;
     } catch (error) {
-      if (error instanceof TelegraphNormalizationError) {
+      if (error instanceof TelegraphNormalizationError || error instanceof TelegraphResponseError) {
         throw error;
       }
       throw new TelegraphNormalizationError(

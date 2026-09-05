@@ -123,8 +123,17 @@ function normalizeCveId(records: UnknownRecord[]): string | null {
 }
 
 function readSeverity(records: UnknownRecord[]): Severity | null {
-  const value = firstValue(records, ["severity", "baseSeverity"]);
-  return value === undefined || value === null ? null : normalizeSeverity(value);
+  const values = allValues(records, ["severity", "baseSeverity"])
+    .filter((value) => value !== undefined && value !== null)
+    .map(normalizeSeverity);
+  const unique = [...new Set(values)];
+  if (unique.length > 1) {
+    throw new TelegraphNormalizationError(
+      "Telegraph returned conflicting severity values.",
+      { field: "severity", values: unique },
+    );
+  }
+  return unique[0] ?? null;
 }
 
 function readCvss(records: UnknownRecord[]): number | null {

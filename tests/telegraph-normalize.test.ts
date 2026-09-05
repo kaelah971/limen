@@ -130,6 +130,17 @@ describe("normalizeTelegraphEvidence", () => {
     expect(evidence.cveId).toBeNull();
   });
 
+  it("rejects conflicting severity fields instead of trusting the first value", () => {
+    expect(() => normalizeTelegraphEvidence(
+      {
+        intent: "CVE_LOOKUP",
+        severity: "HIGH",
+        result: { severity: "LOW" },
+      },
+      context,
+    )).toThrow("conflicting severity values");
+  });
+
   it("handles null responses as unknown evidence and rejects non-object responses", () => {
     const emptyEvidence = normalizeTelegraphEvidence(null, context);
     expect(emptyEvidence.cveId).toBeNull();

@@ -516,6 +516,34 @@ describe("ledger and API telemetry", () => {
       }
     }
   });
+
+  it("returns a safe 500 when request setup rejects before normal handling", async () => {
+    let server: ReturnType<typeof createLedgerServer> | undefined;
+    try {
+      server = createLedgerServer({
+        ledger: { persistRun: vi.fn(), getRun: vi.fn() },
+        ingestToken: "ledger-secret",
+        observability: {
+          emit: () => {
+            throw new Error("observability setup failed");
+          },
+        },
+      });
+      await new Promise<void>((resolve) => server?.listen(0, "127.0.0.1", () => resolve()));
+      const address = server.address() as AddressInfo;
+      const response = await fetch(`http://127.0.0.1:${address.port}/v1/receipts/LM-REC-UNKNOWN01`);
+
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({
+        code: "LEDGER_INTERNAL_ERROR",
+        message: "The evidence ledger request failed.",
+      });
+    } finally {
+      if (server !== undefined) {
+        await new Promise<void>((resolve) => server?.close(() => resolve()));
+      }
+    }
+  });
 });
 
 afterEach(() => {

@@ -183,6 +183,50 @@ describe("GitHubClientImpl", () => {
     expect(result.data.encoding).toBe("base64");
   });
 
+  it("rejects a Contents response for a different path", async () => {
+    await expect(
+      createClient([
+        jsonResponse({
+          type: "file",
+          encoding: "base64",
+          content: "cHJvZHVjdGlvbjoK",
+          path: "other/limen.yml",
+        }),
+      ]).client.getRepositoryFile({
+        owner: "owner",
+        repo: "repo",
+        path: "limen.yml",
+        ref: "a".repeat(40),
+      }),
+    ).rejects.toMatchObject({
+      code: "GITHUB_RESPONSE_ERROR",
+      details: {
+        expectedPath: "limen.yml",
+        actualPath: "other/limen.yml",
+      },
+    });
+  });
+
+  it("times out while reading a response body", async () => {
+    const response = {
+      status: 200,
+      headers: new Headers(),
+      text: () => new Promise<string>(() => undefined),
+    } as unknown as Response;
+    const { client, calls } = createClient([response], { timeoutMs: 10 });
+
+    await expect(client.compareDependencies({
+      owner: "owner",
+      repo: "repo",
+      base: "base-ref",
+      head: "head-ref",
+    })).rejects.toMatchObject({
+      code: "GITHUB_API_ERROR",
+      details: { operation: "dependency_review", reason: "timeout" },
+    });
+    expect((calls[0]?.init?.signal as AbortSignal).aborted).toBe(true);
+  });
+
   it("accepts full SHAs, explicit refs, and rejects ambiguous abbreviated SHAs", async () => {
     const fullBase = "A".repeat(40);
     const fullHead = "B".repeat(40);
