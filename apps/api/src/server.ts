@@ -34,9 +34,11 @@ import {
 } from "./receipt-repository";
 import {
   handleGitHubInstallationBind,
+  handleGitHubEvaluation,
   handleGitHubRepositoryRequest,
   handleGitHubWebhook,
   type GitHubInstallationBindRouteOptions,
+  type GitHubEvaluationRouteOptions,
   type GitHubRepositoryRouteOptions,
   type GitHubWebhookRouteOptions,
 } from "./github-app-routes";
@@ -49,6 +51,7 @@ export interface LedgerServerOptions {
   receipts?: EvidenceReceiptStore;
   githubWebhook?: GitHubWebhookRouteOptions;
   githubInstallationBind?: GitHubInstallationBindRouteOptions;
+  githubEvaluationApi?: GitHubEvaluationRouteOptions;
   githubRepositoryApi?: GitHubRepositoryRouteOptions;
   maxBodyBytes?: number;
   observability?: LimenObservabilityLogger;
@@ -112,6 +115,9 @@ function routeTemplate(request: IncomingMessage): string {
     }
     if (path[1] === "github" && path[2] === "webhooks" && path.length === 3) {
       return "/v1/github/webhooks";
+    }
+    if (path[1] === "github" && path[2] === "evaluations" && path.length === 3) {
+      return "/v1/github/evaluations";
     }
     if (
       path[1] === "github"
@@ -393,6 +399,26 @@ async function handleRequest(
         });
       } else {
         requestStage.success({ httpStatus: webhookResponse.status });
+      }
+      return;
+    }
+    if (request.method === "POST" && path.length === 3 && path[0] === "v1" && path[1] === "github" && path[2] === "evaluations") {
+      if (options.githubEvaluationApi === undefined) {
+        throw new LedgerApiRequestError(
+          503,
+          "GITHUB_EVALUATION_API_NOT_CONFIGURED",
+          "GitHub evaluation processing is not configured.",
+        );
+      }
+      const evaluationResponse = await handleGitHubEvaluation(request, options.githubEvaluationApi);
+      sendJson(response, evaluationResponse.status, evaluationResponse.body);
+      if (evaluationResponse.status >= 400) {
+        requestStage.failure(undefined, {
+          httpStatus: evaluationResponse.status,
+          errorCode: String(evaluationResponse.body.code ?? "GITHUB_EVALUATION_ERROR"),
+        });
+      } else {
+        requestStage.success({ httpStatus: evaluationResponse.status });
       }
       return;
     }

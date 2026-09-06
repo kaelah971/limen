@@ -57,6 +57,34 @@ export interface GitHubRepositoryRecord {
   setupPullRequest: SetupPullRequestRecord | null;
 }
 
+export interface GitHubEvaluationRepositoryRecord {
+  repositoryId: number;
+  installationId: number;
+  fullName: string;
+  installationConnectionState: "ACTIVE" | "DISCONNECTED";
+  lifecycleState: RepositoryLifecycleState;
+}
+
+export interface GitHubEvaluationInput {
+  repositoryId: number;
+  githubRunId: number;
+  githubRunAttempt: number;
+  workflowRef: string;
+  commitSha: string;
+  decision: LimenReleaseDecision;
+  receiptId: string | null;
+  evaluatedAt: string;
+}
+
+export interface GitHubEvaluationRecord extends GitHubEvaluationInput {
+  id: string;
+}
+
+export interface GitHubEvaluationStore {
+  getEvaluationRepository(repositoryId: number): Promise<GitHubEvaluationRepositoryRecord | null>;
+  recordGitHubEvaluation(input: GitHubEvaluationInput): Promise<GitHubEvaluationRecord>;
+}
+
 export interface GitHubRepositoryStore extends GitHubInstallationAuthorizationStore, SetupPersistence {
   listAuthorizedRepositories(authUserId: string): Promise<GitHubRepositoryRecord[]>;
   getAuthorizedRepository(
@@ -148,6 +176,25 @@ export class GitHubSetupPersistenceError extends Error {
   constructor(code: GitHubSetupPersistenceErrorCode, message: string) {
     super(message);
     this.name = "GitHubSetupPersistenceError";
+    this.code = code;
+  }
+}
+
+export type GitHubEvaluationPersistenceErrorCode =
+  | "GITHUB_REPOSITORY_NOT_FOUND"
+  | "GITHUB_INSTALLATION_NOT_FOUND"
+  | "GITHUB_INSTALLATION_DISCONNECTED"
+  | "GITHUB_REPOSITORY_DISCONNECTED"
+  | "GITHUB_EVALUATION_CONFLICT"
+  | "GITHUB_EVALUATION_INPUT_INVALID"
+  | "GITHUB_EVALUATION_PERSISTENCE_ERROR";
+
+export class GitHubEvaluationPersistenceError extends Error {
+  readonly code: GitHubEvaluationPersistenceErrorCode;
+
+  constructor(code: GitHubEvaluationPersistenceErrorCode, message: string) {
+    super(message);
+    this.name = "GitHubEvaluationPersistenceError";
     this.code = code;
   }
 }
@@ -328,8 +375,181 @@ function repositoryRow(
   };
 }
 
-export class SupabaseGitHubAppStore implements GitHubAppStore, GitHubInstallationAuthorizationStore {
+function evaluationRecord(value: unknown): GitHubEvaluationRecord {
+  const row = objectRow(value);
+  const id = requiredRowText(row.id);
+  const repositoryId = numericValue(row.repository_id);
+  const githubRunId = numericValue(row.github_run_id);
+  const githubRunAttempt = numericValue(row.run_attempt);
+  const workflowRef = requiredRowText(row.workflow_ref);
+  const commitSha = requiredRowText(row.commit_sha);
+  const decision = releaseDecision(row.decision);
+  const evaluatedAt = requiredRowText(row.evaluated_at);
+  if (
+    id === null
+    || repositoryId === null
+    || repositoryId <= 0
+    || githubRunId === null
+    || githubRunId <= 0
+    || githubRunAttempt === null
+    || githubRunAttempt <= 0
+    || workflowRef === null
+    || commitSha === null
+    || !/^[0-9a-fA-F]{40}$/.test(commitSha)
+    || decision === null
+    || evaluatedAt === null
+    || (row.receipt_id !== null && row.receipt_id !== undefined && requiredRowText(row.receipt_id) === null)
+  ) {
+    throw new GitHubAppStoreError();
+  }
+  return {
+    id,
+    repositoryId,
+    githubRunId,
+    githubRunAttempt,
+    workflowRef,
+    commitSha,
+    decision,
+    receiptId: row.receipt_id === null || row.receipt_id === undefined
+      ? null
+      : requiredRowText(row.receipt_id),
+    evaluatedAt,
+  };
+}
+
+function mapGitHubEvaluationPersistenceError(error: unknown): GitHubEvaluationPersistenceError {
+  const row = objectRow(error);
+  const code = typeof row.code === "string" ? row.code : "";
+  const message = typeof row.message === "string" ? row.message : "";
+  if (message === "GITHUB_REPOSITORY_NOT_FOUND" || code === "P0002") {
+    return new GitHubEvaluationPersistenceError(
+      "GITHUB_REPOSITORY_NOT_FOUND",
+      "The GitHub repository was not found.",
+    );
+  }
+  if (message === "GITHUB_INSTALLATION_NOT_FOUND" || code === "P0003") {
+    return new GitHubEvaluationPersistenceError(
+      "GITHUB_INSTALLATION_NOT_FOUND",
+      "The GitHub installation was not found.",
+    );
+  }
+  if (message === "GITHUB_INSTALLATION_DISCONNECTED" || code === "P0004") {
+    return new GitHubEvaluationPersistenceError(
+      "GITHUB_INSTALLATION_DISCONNECTED",
+      "The GitHub installation is disconnected.",
+    );
+  }
+  if (message === "GITHUB_REPOSITORY_DISCONNECTED" || code === "P0005") {
+    return new GitHubEvaluationPersistenceError(
+      "GITHUB_REPOSITORY_DISCONNECTED",
+      "The GitHub repository is disconnected.",
+    );
+  }
+  if (message === "GITHUB_EVALUATION_CONFLICT" || code === "P0006") {
+    return new GitHubEvaluationPersistenceError(
+      "GITHUB_EVALUATION_CONFLICT",
+      "This GitHub evaluation already exists with different evidence.",
+    );
+  }
+  if (message === "GITHUB_EVALUATION_INPUT_INVALID" || code === "22023") {
+    return new GitHubEvaluationPersistenceError(
+      "GITHUB_EVALUATION_INPUT_INVALID",
+      "The GitHub evaluation input is invalid.",
+    );
+  }
+  return new GitHubEvaluationPersistenceError(
+    "GITHUB_EVALUATION_PERSISTENCE_ERROR",
+    "The GitHub evaluation could not be recorded.",
+  );
+}
+
+export class SupabaseGitHubAppStore implements
+  GitHubAppStore,
+  GitHubInstallationAuthorizationStore,
+  GitHubEvaluationStore {
   constructor(private readonly client: SupabaseClient) {}
+
+  async getEvaluationRepository(
+    repositoryId: number,
+  ): Promise<GitHubEvaluationRepositoryRecord | null> {
+    const repositoryResult = await this.client
+      .from("github_repositories")
+      .select("repository_id, installation_id, full_name, lifecycle_state")
+      .eq("repository_id", repositoryId)
+      .maybeSingle();
+    if (repositoryResult.error !== null) {
+      throwStoreError(repositoryResult.error);
+    }
+    if (repositoryResult.data === null) {
+      return null;
+    }
+
+    const repository = objectRow(repositoryResult.data);
+    const installationId = numericValue(repository.installation_id);
+    const fullName = requiredRowText(repository.full_name);
+    const lifecycleState = repositoryLifecycleState(repository.lifecycle_state);
+    if (
+      installationId === null
+      || installationId <= 0
+      || fullName === null
+      || lifecycleState === null
+    ) {
+      throw new GitHubAppStoreError();
+    }
+
+    const installationResult = await this.client
+      .from("github_installations")
+      .select("connection_state")
+      .eq("installation_id", installationId)
+      .maybeSingle();
+    if (installationResult.error !== null) {
+      throwStoreError(installationResult.error);
+    }
+    if (installationResult.data === null) {
+      throw new GitHubAppStoreError();
+    }
+    const connectionState = objectRow(installationResult.data).connection_state;
+    if (connectionState !== "ACTIVE" && connectionState !== "DISCONNECTED") {
+      throw new GitHubAppStoreError();
+    }
+
+    return {
+      repositoryId,
+      installationId,
+      fullName,
+      installationConnectionState: connectionState,
+      lifecycleState,
+    };
+  }
+
+  async recordGitHubEvaluation(input: GitHubEvaluationInput): Promise<GitHubEvaluationRecord> {
+    let result: { data: unknown; error: unknown };
+    try {
+      result = await this.client.rpc("record_github_evaluation_and_verify", {
+        p_repository_id: input.repositoryId,
+        p_github_run_id: input.githubRunId,
+        p_run_attempt: input.githubRunAttempt,
+        p_workflow_ref: input.workflowRef,
+        p_commit_sha: input.commitSha,
+        p_decision: input.decision,
+        p_receipt_id: input.receiptId,
+        p_evaluated_at: input.evaluatedAt,
+      });
+    } catch (error) {
+      throw mapGitHubEvaluationPersistenceError(error);
+    }
+    if (result.error !== null) {
+      throw mapGitHubEvaluationPersistenceError(result.error);
+    }
+    try {
+      return evaluationRecord(result.data);
+    } catch {
+      throw new GitHubEvaluationPersistenceError(
+        "GITHUB_EVALUATION_PERSISTENCE_ERROR",
+        "The GitHub evaluation could not be recorded.",
+      );
+    }
+  }
 
   async upsertGitHubUser(input: GitHubUserInput): Promise<void> {
     const { error } = await this.client

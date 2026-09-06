@@ -6,6 +6,8 @@ import {
   SetupGitHubError,
   SetupInspectionError,
   SetupPersistenceError,
+  GitHubActionsOidcError,
+  verifyGitHubActionsOidcToken,
   verifyGitHubWebhookSignature,
 } from "../../../packages/github-app/src";
 import {
@@ -13,8 +15,11 @@ import {
   GitHubInstallationAlreadyBoundError,
   GitHubInstallationDisconnectedError,
   GitHubInstallationNotConfirmedError,
+  GitHubEvaluationPersistenceError,
   GitHubRepositoryStore,
   GitHubSetupPersistenceError,
+  type GitHubEvaluationInput,
+  type GitHubEvaluationStore,
 } from "./github-app-store";
 import type {
   GitHubAppStore,
@@ -24,6 +29,7 @@ import type {
   InstallationCreatedInput,
   SetupPullRequestClosedInput,
 } from "./github-app-store";
+import type { GitHubActionsOidcVerifier } from "../../../packages/github-app/src";
 import type {
   SetupGenerationConfig,
   SetupRepository,
@@ -36,6 +42,7 @@ import {
 } from "./user-auth";
 
 export const GITHUB_WEBHOOK_MAX_BODY_BYTES = 2 * 1024 * 1024;
+export const GITHUB_EVALUATION_MAX_BODY_BYTES = 2 * 1024 * 1024;
 
 export interface GitHubWebhookRouteOptions {
   secret: string;
@@ -70,6 +77,18 @@ export interface GitHubRepositoryHttpResponse {
   body: Record<string, unknown>;
 }
 
+export interface GitHubEvaluationRouteOptions {
+  store: GitHubEvaluationStore;
+  oidcAudience: string;
+  oidcVerifier?: GitHubActionsOidcVerifier;
+  maxBodyBytes?: number;
+}
+
+export interface GitHubEvaluationHttpResponse {
+  status: number;
+  body: Record<string, unknown>;
+}
+
 class GitHubWebhookRequestError extends Error {
   readonly status: number;
   readonly code: string;
@@ -89,6 +108,18 @@ class GitHubRepositoryRequestError extends Error {
   constructor(status: number, code: string, message: string) {
     super(message);
     this.name = "GitHubRepositoryRequestError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+class GitHubEvaluationRequestError extends Error {
+  readonly status: number;
+  readonly code: string;
+
+  constructor(status: number, code: string, message: string) {
+    super(message);
+    this.name = "GitHubEvaluationRequestError";
     this.status = status;
     this.code = code;
   }
@@ -543,6 +574,261 @@ function repositoryErrorResponse(error: unknown): GitHubRepositoryHttpResponse {
     code: "GITHUB_REPOSITORY_API_INTERNAL_ERROR",
     message: "The GitHub repository request failed.",
   });
+}
+
+function evaluationRequestError(
+  status: number,
+  code: string,
+  message: string,
+): GitHubEvaluationRequestError {
+  return new GitHubEvaluationRequestError(status, code, message);
+}
+
+function evaluationObjectValue(value: unknown): Record<string, unknown> {
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  throw evaluationRequestError(400, "GITHUB_EVALUATION_INVALID_REQUEST", "The GitHub evaluation request is invalid.");
+}
+
+function evaluationPositiveInteger(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+    throw evaluationRequestError(400, "GITHUB_EVALUATION_INVALID_REQUEST", `The GitHub evaluation field ${field} is invalid.`);
+  }
+  return value;
+}
+
+function evaluationText(value: unknown, field: string, maxLength: number): string {
+  if (
+    typeof value !== "string"
+    || value.length === 0
+    || value.length > maxLength
+    || /[\u0000-\u001f\u007f]/.test(value)
+  ) {
+    throw evaluationRequestError(400, "GITHUB_EVALUATION_INVALID_REQUEST", `The GitHub evaluation field ${field} is invalid.`);
+  }
+  return value;
+}
+
+function evaluationReceiptId(value: unknown): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  return evaluationText(value, "receiptId", 255);
+}
+
+function evaluationTimestamp(value: unknown): string {
+  const timestamp = evaluationText(value, "evaluatedAt", 64);
+  if (
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(timestamp)
+    || Number.isNaN(Date.parse(timestamp))
+  ) {
+    throw evaluationRequestError(400, "GITHUB_EVALUATION_INVALID_REQUEST", "The GitHub evaluation timestamp is invalid.");
+  }
+  return timestamp;
+}
+
+function evaluationInput(value: unknown): GitHubEvaluationInput {
+  const body = evaluationObjectValue(value);
+  const fields = new Set([
+    "repositoryId",
+    "githubRunId",
+    "githubRunAttempt",
+    "workflowRef",
+    "commitSha",
+    "decision",
+    "receiptId",
+    "evaluatedAt",
+  ]);
+  if (Object.keys(body).some((key) => !fields.has(key))) {
+    throw evaluationRequestError(
+      400,
+      "GITHUB_EVALUATION_INVALID_REQUEST",
+      "The GitHub evaluation request contains unsupported fields.",
+    );
+  }
+
+  const commitSha = evaluationText(body.commitSha, "commitSha", 40);
+  if (!/^[0-9a-fA-F]{40}$/.test(commitSha)) {
+    throw evaluationRequestError(400, "GITHUB_EVALUATION_INVALID_REQUEST", "The GitHub evaluation commit SHA is invalid.");
+  }
+  const decision = body.decision;
+  if (decision !== "PASS" && decision !== "HOLD" && decision !== "REVIEW") {
+    throw evaluationRequestError(400, "GITHUB_EVALUATION_INVALID_REQUEST", "The GitHub evaluation decision is invalid.");
+  }
+  return {
+    repositoryId: evaluationPositiveInteger(body.repositoryId, "repositoryId"),
+    githubRunId: evaluationPositiveInteger(body.githubRunId, "githubRunId"),
+    githubRunAttempt: evaluationPositiveInteger(body.githubRunAttempt, "githubRunAttempt"),
+    workflowRef: evaluationText(body.workflowRef, "workflowRef", 700),
+    commitSha,
+    decision,
+    receiptId: evaluationReceiptId(body.receiptId),
+    evaluatedAt: evaluationTimestamp(body.evaluatedAt),
+  };
+}
+
+async function readEvaluationBody(
+  request: IncomingMessage,
+  maxBodyBytes: number,
+): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (size > maxBodyBytes) {
+      throw evaluationRequestError(413, "GITHUB_EVALUATION_PAYLOAD_TOO_LARGE", "The GitHub evaluation payload is too large.");
+    }
+    chunks.push(buffer);
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks, size).toString("utf8")) as unknown;
+  } catch {
+    throw evaluationRequestError(400, "GITHUB_EVALUATION_INVALID_JSON", "The GitHub evaluation payload must be valid JSON.");
+  }
+}
+
+function evaluationBearerToken(request: IncomingMessage): string {
+  const authorization = headerValue(request, "authorization");
+  if (authorization === undefined || !authorization.startsWith("Bearer ")) {
+    throw evaluationRequestError(401, "GITHUB_OIDC_UNAUTHORIZED", "A valid GitHub Actions OIDC token is required.");
+  }
+  const token = authorization.slice("Bearer ".length);
+  if (token.length === 0 || /\s/.test(token)) {
+    throw evaluationRequestError(401, "GITHUB_OIDC_UNAUTHORIZED", "A valid GitHub Actions OIDC token is required.");
+  }
+  return token;
+}
+
+function repositoryMatchesIdentity(
+  repository: { fullName: string },
+  identity: { repository: string },
+): boolean {
+  return repository.fullName === identity.repository;
+}
+
+function evaluationErrorResponse(error: unknown): GitHubEvaluationHttpResponse {
+  if (error instanceof GitHubEvaluationRequestError) {
+    return response(error.status, { code: error.code, message: error.message });
+  }
+  if (error instanceof GitHubActionsOidcError) {
+    return response(401, {
+      code: error.code,
+      message: "The GitHub Actions OIDC token is invalid.",
+    });
+  }
+  if (error instanceof GitHubEvaluationPersistenceError) {
+    if (error.code === "GITHUB_REPOSITORY_NOT_FOUND") {
+      return response(404, { code: error.code, message: error.message });
+    }
+    if (
+      error.code === "GITHUB_INSTALLATION_DISCONNECTED"
+      || error.code === "GITHUB_REPOSITORY_DISCONNECTED"
+    ) {
+      return response(409, { code: error.code, message: error.message });
+    }
+    if (error.code === "GITHUB_EVALUATION_CONFLICT") {
+      return response(409, { code: error.code, message: error.message });
+    }
+    if (error.code === "GITHUB_EVALUATION_INPUT_INVALID") {
+      return response(400, { code: error.code, message: error.message });
+    }
+    return response(500, {
+      code: error.code,
+      message: "The GitHub evaluation service is temporarily unavailable.",
+    });
+  }
+  if (error instanceof GitHubAppStoreError) {
+    return response(500, {
+      code: error.code,
+      message: "The GitHub evaluation service is temporarily unavailable.",
+    });
+  }
+  if (
+    error !== null
+    && typeof error === "object"
+    && "code" in error
+    && error.code === "GITHUB_EVALUATION_CONFLICT"
+  ) {
+    return response(409, {
+      code: "GITHUB_EVALUATION_CONFLICT",
+      message: "This GitHub evaluation already exists with different evidence.",
+    });
+  }
+  return response(500, {
+    code: "GITHUB_EVALUATION_INTERNAL_ERROR",
+    message: "The GitHub evaluation could not be recorded.",
+  });
+}
+
+export async function handleGitHubEvaluation(
+  request: IncomingMessage,
+  options: GitHubEvaluationRouteOptions,
+): Promise<GitHubEvaluationHttpResponse> {
+  try {
+    const token = evaluationBearerToken(request);
+    const identity = await verifyGitHubActionsOidcToken(
+      token,
+      options.oidcAudience,
+      options.oidcVerifier,
+    );
+    const input = evaluationInput(
+      await readEvaluationBody(request, options.maxBodyBytes ?? GITHUB_EVALUATION_MAX_BODY_BYTES),
+    );
+    if (
+      input.repositoryId !== identity.repositoryId
+      || input.githubRunId !== identity.runId
+      || input.githubRunAttempt !== identity.runAttempt
+      || input.workflowRef !== identity.workflowRef
+    ) {
+      return response(403, {
+        code: "GITHUB_EVALUATION_CLAIM_MISMATCH",
+        message: "The GitHub evaluation does not match the OIDC claims.",
+      });
+    }
+
+    const repository = await options.store.getEvaluationRepository(input.repositoryId);
+    if (repository === null) {
+      return response(404, {
+        code: "GITHUB_REPOSITORY_NOT_FOUND",
+        message: "The GitHub repository was not found.",
+      });
+    }
+    if (!repositoryMatchesIdentity(repository, identity)) {
+      return response(403, {
+        code: "GITHUB_EVALUATION_REPOSITORY_MISMATCH",
+        message: "The GitHub OIDC repository does not match the stored repository.",
+      });
+    }
+    if (repository.installationConnectionState !== "ACTIVE") {
+      return response(409, {
+        code: "GITHUB_INSTALLATION_DISCONNECTED",
+        message: "The GitHub installation is disconnected.",
+      });
+    }
+    if (repository.lifecycleState === "DISCONNECTED") {
+      return response(409, {
+        code: "GITHUB_REPOSITORY_DISCONNECTED",
+        message: "The GitHub repository is disconnected.",
+      });
+    }
+    if (
+      repository.lifecycleState !== "CONFIGURED"
+      && repository.lifecycleState !== "NEEDS_ATTENTION"
+      && repository.lifecycleState !== "VERIFIED"
+    ) {
+      return response(409, {
+        code: "GITHUB_REPOSITORY_NOT_READY",
+        message: "The GitHub repository is not ready to accept evaluations.",
+      });
+    }
+
+    const evaluation = await options.store.recordGitHubEvaluation(input);
+    return response(200, { accepted: true, evaluation });
+  } catch (error) {
+    return evaluationErrorResponse(error);
+  }
 }
 
 export async function handleGitHubRepositoryRequest(

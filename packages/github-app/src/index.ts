@@ -16,6 +16,22 @@ export type { GitHubAppConfig } from "./config";
 export { verifyGitHubWebhookSignature } from "./webhook";
 
 export {
+  GITHUB_ACTIONS_OIDC_ISSUER,
+  GITHUB_ACTIONS_OIDC_JWKS_URL,
+  GITHUB_ACTIONS_OIDC_MAX_TOKEN_BYTES,
+  GitHubActionsOidcError,
+  verifyGitHubActionsOidcToken,
+} from "./oidc";
+
+export type {
+  GitHubActionsOidcErrorCode,
+  GitHubActionsOidcVerificationResult,
+  GitHubActionsOidcVerifier,
+  GitHubActionsOidcVerifyOptions,
+  VerifiedGitHubActionsIdentity,
+} from "./oidc";
+
+export {
   buildLimenWorkflow,
   createSetupPullRequest,
   createSetupService,
