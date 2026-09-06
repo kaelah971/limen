@@ -33,7 +33,9 @@ import {
   ReceiptRevokedError,
 } from "./receipt-repository";
 import {
+  handleGitHubInstallationBind,
   handleGitHubWebhook,
+  type GitHubInstallationBindRouteOptions,
   type GitHubWebhookRouteOptions,
 } from "./github-app-routes";
 
@@ -44,6 +46,7 @@ export interface LedgerServerOptions {
   ingestToken: string;
   receipts?: EvidenceReceiptStore;
   githubWebhook?: GitHubWebhookRouteOptions;
+  githubInstallationBind?: GitHubInstallationBindRouteOptions;
   maxBodyBytes?: number;
   observability?: LimenObservabilityLogger;
   requestIdFactory?: () => string;
@@ -106,6 +109,14 @@ function routeTemplate(request: IncomingMessage): string {
     }
     if (path[1] === "github" && path[2] === "webhooks" && path.length === 3) {
       return "/v1/github/webhooks";
+    }
+    if (
+      path[1] === "github"
+      && path[2] === "installations"
+      && path.length === 5
+      && path[4] === "bind"
+    ) {
+      return "/v1/github/installations/:installationId/bind";
     }
     return "unknown";
   } catch {
@@ -365,6 +376,37 @@ async function handleRequest(
         });
       } else {
         requestStage.success({ httpStatus: webhookResponse.status });
+      }
+      return;
+    }
+    if (
+      request.method === "POST"
+      && path.length === 5
+      && path[0] === "v1"
+      && path[1] === "github"
+      && path[2] === "installations"
+      && path[4] === "bind"
+    ) {
+      if (options.githubInstallationBind === undefined) {
+        throw new LedgerApiRequestError(
+          503,
+          "GITHUB_INSTALLATION_BIND_NOT_CONFIGURED",
+          "GitHub installation binding is not configured.",
+        );
+      }
+      const bindResponse = await handleGitHubInstallationBind(
+        request,
+        path[3] ?? "",
+        options.githubInstallationBind,
+      );
+      sendJson(response, bindResponse.status, bindResponse.body);
+      if (bindResponse.status >= 400) {
+        requestStage.failure(undefined, {
+          httpStatus: bindResponse.status,
+          errorCode: String(bindResponse.body.code ?? "GITHUB_INSTALLATION_BIND_ERROR"),
+        });
+      } else {
+        requestStage.success({ httpStatus: bindResponse.status });
       }
       return;
     }

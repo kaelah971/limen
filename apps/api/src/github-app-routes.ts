@@ -2,12 +2,24 @@ import type { IncomingMessage } from "node:http";
 import {
   verifyGitHubWebhookSignature,
 } from "../../../packages/github-app/src";
+import {
+  GitHubAppStoreError,
+  GitHubInstallationAlreadyBoundError,
+  GitHubInstallationDisconnectedError,
+  GitHubInstallationNotConfirmedError,
+} from "./github-app-store";
 import type {
   GitHubAppStore,
+  GitHubInstallationAuthorizationStore,
   GitHubRepositoryMetadata,
   InstallationCreatedInput,
   SetupPullRequestClosedInput,
 } from "./github-app-store";
+import {
+  authenticateUser,
+  UserAuthError,
+  type UserAuthClient,
+} from "./user-auth";
 
 export const GITHUB_WEBHOOK_MAX_BODY_BYTES = 2 * 1024 * 1024;
 
@@ -18,6 +30,16 @@ export interface GitHubWebhookRouteOptions {
 }
 
 export interface GitHubWebhookHttpResponse {
+  status: number;
+  body: Record<string, unknown>;
+}
+
+export interface GitHubInstallationBindRouteOptions {
+  authClient: UserAuthClient;
+  store: GitHubInstallationAuthorizationStore;
+}
+
+export interface GitHubInstallationBindHttpResponse {
   status: number;
   body: Record<string, unknown>;
 }
@@ -220,6 +242,93 @@ async function processWebhook(
   }
 
   return false;
+}
+
+function bindInstallationId(value: string): number {
+  if (!/^[1-9]\d*$/.test(value)) {
+    throw new GitHubWebhookRequestError(
+      400,
+      "GITHUB_INSTALLATION_ID_INVALID",
+      "The GitHub installation ID is invalid.",
+    );
+  }
+  const installationId = Number(value);
+  if (!Number.isSafeInteger(installationId) || installationId <= 0) {
+    throw new GitHubWebhookRequestError(
+      400,
+      "GITHUB_INSTALLATION_ID_INVALID",
+      "The GitHub installation ID is invalid.",
+    );
+  }
+  return installationId;
+}
+
+function installationBindErrorResponse(error: unknown): GitHubInstallationBindHttpResponse {
+  if (error instanceof GitHubWebhookRequestError || error instanceof UserAuthError) {
+    return response(error.status, { code: error.code, message: error.message });
+  }
+  if (error instanceof GitHubInstallationNotConfirmedError) {
+    return response(409, { code: error.code, message: error.message });
+  }
+  if (error instanceof GitHubInstallationDisconnectedError) {
+    return response(409, { code: error.code, message: error.message });
+  }
+  if (error instanceof GitHubInstallationAlreadyBoundError) {
+    return response(409, { code: error.code, message: error.message });
+  }
+  if (error instanceof GitHubAppStoreError) {
+    return response(500, {
+      code: error.code,
+      message: "The GitHub installation metadata store is unavailable.",
+    });
+  }
+  return response(500, {
+    code: "GITHUB_INSTALLATION_BIND_INTERNAL_ERROR",
+    message: "The GitHub installation could not be bound.",
+  });
+}
+
+export async function handleGitHubInstallationBind(
+  request: IncomingMessage,
+  installationIdValue: string,
+  options: GitHubInstallationBindRouteOptions,
+): Promise<GitHubInstallationBindHttpResponse> {
+  try {
+    const user = await authenticateUser(request, options.authClient, options.store);
+    const installationId = bindInstallationId(installationIdValue);
+    const installation = await options.store.getInstallation(installationId);
+    if (installation === null) {
+      throw new GitHubInstallationNotConfirmedError();
+    }
+    if (installation.connectionState === "DISCONNECTED") {
+      throw new GitHubInstallationDisconnectedError();
+    }
+    if (installation.installedByGithubUserId !== user.githubUserId) {
+      return response(403, {
+        code: "GITHUB_INSTALLATION_USER_MISMATCH",
+        message: "The authenticated GitHub user did not install this GitHub App installation.",
+      });
+    }
+    if (installation.boundByAuthUserId === user.authUserId) {
+      return response(200, {
+        bound: true,
+        alreadyBound: true,
+        installationId,
+      });
+    }
+    if (installation.boundByAuthUserId !== null) {
+      throw new GitHubInstallationAlreadyBoundError();
+    }
+
+    const binding = await options.store.bindInstallation(installationId, user.authUserId);
+    return response(200, {
+      bound: true,
+      ...(binding === "ALREADY_BOUND" ? { alreadyBound: true } : {}),
+      installationId,
+    });
+  } catch (error) {
+    return installationBindErrorResponse(error);
+  }
 }
 
 export async function handleGitHubWebhook(

@@ -23,6 +23,28 @@ export interface SetupPullRequestClosedInput {
   merged: boolean;
 }
 
+export interface GitHubUserInput {
+  authUserId: string;
+  githubUserId: number;
+  githubLogin: string;
+}
+
+export interface GitHubInstallationRecord {
+  installationId: number;
+  installedByGithubUserId: number;
+  boundByAuthUserId: string | null;
+  connectionState: "ACTIVE" | "DISCONNECTED";
+}
+
+export interface GitHubInstallationAuthorizationStore {
+  upsertGitHubUser(input: GitHubUserInput): Promise<void>;
+  getInstallation(installationId: number): Promise<GitHubInstallationRecord | null>;
+  bindInstallation(
+    installationId: number,
+    authUserId: string,
+  ): Promise<"BOUND" | "ALREADY_BOUND">;
+}
+
 export interface GitHubWebhookDeliveryClaim {
   duplicate: boolean;
 }
@@ -51,6 +73,33 @@ export class GitHubAppStoreError extends Error {
   constructor() {
     super("The GitHub App metadata store is unavailable.");
     this.name = "GitHubAppStoreError";
+  }
+}
+
+export class GitHubInstallationNotConfirmedError extends Error {
+  readonly code = "INSTALLATION_NOT_CONFIRMED" as const;
+
+  constructor() {
+    super("The GitHub installation has not been confirmed by a verified webhook.");
+    this.name = "GitHubInstallationNotConfirmedError";
+  }
+}
+
+export class GitHubInstallationDisconnectedError extends Error {
+  readonly code = "INSTALLATION_DISCONNECTED" as const;
+
+  constructor() {
+    super("The GitHub installation is disconnected.");
+    this.name = "GitHubInstallationDisconnectedError";
+  }
+}
+
+export class GitHubInstallationAlreadyBoundError extends Error {
+  readonly code = "INSTALLATION_ALREADY_BOUND" as const;
+
+  constructor() {
+    super("The GitHub installation is already bound to another Limen user.");
+    this.name = "GitHubInstallationAlreadyBoundError";
   }
 }
 
@@ -83,8 +132,88 @@ function repositoryRow(
   };
 }
 
-export class SupabaseGitHubAppStore implements GitHubAppStore {
+export class SupabaseGitHubAppStore implements GitHubAppStore, GitHubInstallationAuthorizationStore {
   constructor(private readonly client: SupabaseClient) {}
+
+  async upsertGitHubUser(input: GitHubUserInput): Promise<void> {
+    const { error } = await this.client
+      .from("github_users")
+      .upsert({
+        auth_user_id: input.authUserId,
+        github_user_id: input.githubUserId,
+        github_login: input.githubLogin,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "auth_user_id" });
+    if (error !== null) {
+      throwStoreError(error);
+    }
+  }
+
+  async getInstallation(installationId: number): Promise<GitHubInstallationRecord | null> {
+    const { data, error } = await this.client
+      .from("github_installations")
+      .select("installation_id, installed_by_github_user_id, bound_by_auth_user_id, connection_state")
+      .eq("installation_id", installationId)
+      .maybeSingle();
+    if (error !== null) {
+      throwStoreError(error);
+    }
+    if (data === null) {
+      return null;
+    }
+    const row = data as Record<string, unknown>;
+    if (
+      typeof row.installation_id !== "number"
+      || !Number.isSafeInteger(row.installation_id)
+      || typeof row.installed_by_github_user_id !== "number"
+      || !Number.isSafeInteger(row.installed_by_github_user_id)
+      || (row.bound_by_auth_user_id !== null && typeof row.bound_by_auth_user_id !== "string")
+      || (row.connection_state !== "ACTIVE" && row.connection_state !== "DISCONNECTED")
+    ) {
+      throw new GitHubAppStoreError();
+    }
+    return {
+      installationId: row.installation_id,
+      installedByGithubUserId: row.installed_by_github_user_id,
+      boundByAuthUserId: row.bound_by_auth_user_id,
+      connectionState: row.connection_state,
+    };
+  }
+
+  async bindInstallation(
+    installationId: number,
+    authUserId: string,
+  ): Promise<"BOUND" | "ALREADY_BOUND"> {
+    const { data, error } = await this.client
+      .from("github_installations")
+      .update({
+        bound_by_auth_user_id: authUserId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("installation_id", installationId)
+      .eq("connection_state", "ACTIVE")
+      .is("bound_by_auth_user_id", null)
+      .select("installation_id")
+      .maybeSingle();
+    if (error !== null) {
+      throwStoreError(error);
+    }
+    if (data !== null) {
+      return "BOUND";
+    }
+
+    const installation = await this.getInstallation(installationId);
+    if (installation === null) {
+      throw new GitHubInstallationNotConfirmedError();
+    }
+    if (installation.connectionState === "DISCONNECTED") {
+      throw new GitHubInstallationDisconnectedError();
+    }
+    if (installation.boundByAuthUserId === authUserId) {
+      return "ALREADY_BOUND";
+    }
+    throw new GitHubInstallationAlreadyBoundError();
+  }
 
   async claimDelivery(
     deliveryId: string,
