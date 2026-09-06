@@ -30,6 +30,16 @@ export interface LimenEvaluationCallbackInput {
   evaluatedAt: string | undefined;
 }
 
+export interface LimenIntegrationHealthCallbackInput {
+  limenApiUrl?: string;
+  repositoryId: string | number | undefined;
+  githubRunId: string | number | undefined;
+  githubRunAttempt: string | number | undefined;
+  workflowRef: string | undefined;
+  code: "CONFIGURATION_INVALID";
+  observedAt: string | undefined;
+}
+
 export type LimenCallbackStatus = "disabled" | "reported" | "failed";
 
 export interface LimenCallbackResult {
@@ -120,6 +130,36 @@ function buildRequestBody(input: LimenEvaluationCallbackInput): Record<string, u
   };
 }
 
+function buildHealthRequestBody(
+  input: LimenIntegrationHealthCallbackInput,
+): Record<string, unknown> | undefined {
+  const repositoryId = safePositiveInteger(input.repositoryId);
+  const githubRunId = safePositiveInteger(input.githubRunId);
+  const githubRunAttempt = safePositiveInteger(input.githubRunAttempt);
+  const workflowRef = safeText(input.workflowRef, 700);
+  const observedAt = safeText(input.observedAt, 64);
+  if (
+    repositoryId === undefined
+    || githubRunId === undefined
+    || githubRunAttempt === undefined
+    || workflowRef === undefined
+    || input.code !== "CONFIGURATION_INVALID"
+    || observedAt === undefined
+    || !ISO_TIMESTAMP_PATTERN.test(observedAt)
+    || Number.isNaN(Date.parse(observedAt))
+  ) {
+    return undefined;
+  }
+  return {
+    repositoryId,
+    githubRunId,
+    githubRunAttempt,
+    workflowRef,
+    code: "CONFIGURATION_INVALID",
+    observedAt,
+  };
+}
+
 async function readBoundedResponseBody(response: Response): Promise<void> {
   const contentLength = response.headers.get("content-length");
   if (contentLength !== null) {
@@ -134,26 +174,12 @@ async function readBoundedResponseBody(response: Response): Promise<void> {
   }
 }
 
-export async function reportLimenEvaluation(
-  input: LimenEvaluationCallbackInput,
-  dependencies: LimenCallbackDependencies = {},
+async function postCallback(
+  limenApiUrl: string,
+  path: "/v1/github/evaluations" | "/v1/github/integration-health",
+  serializedBody: string,
+  dependencies: LimenCallbackDependencies,
 ): Promise<LimenCallbackResult> {
-  if (input.limenApiUrl === undefined) {
-    return { status: "disabled" };
-  }
-  if (!input.limenApiUrl.startsWith("https://") || /[\s\u0000-\u001f\u007f]/.test(input.limenApiUrl)) {
-    return failed("CALLBACK_URL_INVALID");
-  }
-
-  const body = buildRequestBody(input);
-  if (body === undefined) {
-    return failed("CALLBACK_CONTEXT_INVALID");
-  }
-  const serializedBody = JSON.stringify(body);
-  if (new TextEncoder().encode(serializedBody).byteLength > MAX_REQUEST_BODY_BYTES) {
-    return failed("CALLBACK_REQUEST_TOO_LARGE");
-  }
-
   let token: string;
   try {
     token = await (dependencies.core ?? defaultCore).getIDToken(CALLBACK_AUDIENCE);
@@ -181,7 +207,7 @@ export async function reportLimenEvaluation(
   });
   try {
     const request = (dependencies.fetch ?? fetch)(
-      `${input.limenApiUrl.replace(/\/+$/, "")}/v1/github/evaluations`,
+      `${limenApiUrl.replace(/\/+$/, "")}${path}`,
       {
         method: "POST",
         headers: {
@@ -216,4 +242,48 @@ export async function reportLimenEvaluation(
       clearTimeout(timeout);
     }
   }
+}
+
+export async function reportLimenEvaluation(
+  input: LimenEvaluationCallbackInput,
+  dependencies: LimenCallbackDependencies = {},
+): Promise<LimenCallbackResult> {
+  if (input.limenApiUrl === undefined) {
+    return { status: "disabled" };
+  }
+  if (!input.limenApiUrl.startsWith("https://") || /[\s\u0000-\u001f\u007f]/.test(input.limenApiUrl)) {
+    return failed("CALLBACK_URL_INVALID");
+  }
+
+  const body = buildRequestBody(input);
+  if (body === undefined) {
+    return failed("CALLBACK_CONTEXT_INVALID");
+  }
+  const serializedBody = JSON.stringify(body);
+  if (new TextEncoder().encode(serializedBody).byteLength > MAX_REQUEST_BODY_BYTES) {
+    return failed("CALLBACK_REQUEST_TOO_LARGE");
+  }
+  return postCallback(input.limenApiUrl, "/v1/github/evaluations", serializedBody, dependencies);
+}
+
+export async function reportLimenIntegrationFault(
+  input: LimenIntegrationHealthCallbackInput,
+  dependencies: LimenCallbackDependencies = {},
+): Promise<LimenCallbackResult> {
+  if (input.limenApiUrl === undefined) {
+    return { status: "disabled" };
+  }
+  if (!input.limenApiUrl.startsWith("https://") || /[\s\u0000-\u001f\u007f]/.test(input.limenApiUrl)) {
+    return failed("CALLBACK_URL_INVALID");
+  }
+
+  const body = buildHealthRequestBody(input);
+  if (body === undefined) {
+    return failed("CALLBACK_CONTEXT_INVALID");
+  }
+  const serializedBody = JSON.stringify(body);
+  if (new TextEncoder().encode(serializedBody).byteLength > MAX_REQUEST_BODY_BYTES) {
+    return failed("CALLBACK_REQUEST_TOO_LARGE");
+  }
+  return postCallback(input.limenApiUrl, "/v1/github/integration-health", serializedBody, dependencies);
 }

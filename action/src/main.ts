@@ -1,6 +1,7 @@
 import * as actionsCore from "@actions/core";
 import { context as githubContext } from "@actions/github";
 import {
+  ConfigurationError,
   createObservabilityLogger,
   isLimenError,
   redactString,
@@ -16,10 +17,10 @@ import {
   type TelegraphClient,
 } from "../../packages/telegraph/src";
 import { parsePullRequestContext } from "./context";
-import { readActionInputs } from "./inputs";
+import { readActionInputs, readOptionalLimenApiUrl } from "./inputs";
 import { loadBaseCommitPolicy } from "./policy";
 import { persistActionLedger } from "./persist";
-import { reportLimenEvaluation } from "./limen-callback";
+import { reportLimenEvaluation, reportLimenIntegrationFault } from "./limen-callback";
 import { createLimenRunId, orchestrateLimenRun } from "./orchestrate";
 import { setActionOutputs } from "./outputs";
 import { renderSummary } from "./summary";
@@ -43,6 +44,32 @@ export function formatActionError(error: unknown): string {
     }
   }
   return `Limen failed: ${serialized.code}. ${serialized.message}${details}`;
+}
+
+export function isDeterministicConfigurationError(error: unknown): boolean {
+  return error instanceof ConfigurationError
+    && error.details?.field === "TELEGRAPH_PRIVATE_KEY";
+}
+
+async function reportConfigurationFailure(
+  error: unknown,
+  limenApiUrl: string | undefined,
+): Promise<void> {
+  if (!isDeterministicConfigurationError(error)) {
+    return;
+  }
+  const callback = await reportLimenIntegrationFault({
+    limenApiUrl,
+    repositoryId: process.env.GITHUB_REPOSITORY_ID,
+    githubRunId: githubContext.runId,
+    githubRunAttempt: githubContext.runAttempt,
+    workflowRef: process.env.GITHUB_WORKFLOW_REF,
+    code: "CONFIGURATION_INVALID",
+    observedAt: new Date().toISOString(),
+  });
+  if (callback.status === "failed") {
+    actionsCore.warning("Limen configuration failed, but integration health reporting failed.");
+  }
 }
 
 export function applyActionOutcome(
@@ -113,6 +140,12 @@ export async function runAction(): Promise<void> {
     );
     let inputs: ReturnType<typeof readActionInputs>;
     let actionContext: ReturnType<typeof parsePullRequestContext>;
+    let callbackLimenApiUrl: string | undefined;
+    try {
+      callbackLimenApiUrl = readOptionalLimenApiUrl();
+    } catch {
+      callbackLimenApiUrl = undefined;
+    }
     try {
       inputs = readActionInputs();
       actionContext = parsePullRequestContext({
@@ -136,6 +169,7 @@ export async function runAction(): Promise<void> {
       Object.assign(workflowCorrelation, correlation);
       validationStage.success(correlation);
     } catch (error) {
+      await reportConfigurationFailure(error, callbackLimenApiUrl);
       validationStage.failure(error);
       throw error;
     }

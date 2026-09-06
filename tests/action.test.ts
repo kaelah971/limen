@@ -278,13 +278,13 @@ describe("P3 action context and inputs", () => {
       getInput: (name) => values[name] ?? "",
       setSecret: (value) => secrets.push(value),
     }, {
-      TELEGRAPH_PRIVATE_KEY: "environment-example",
+      TELEGRAPH_PRIVATE_KEY: `0x${"e".repeat(64)}`,
       TELEGRAPH_ENGINE_URL: "https://engine.example.test/v1/ask",
     });
 
     expect(inputs.maxLookups).toBe(7);
-    expect(inputs.telegraphPrivateKey).toBe("environment-example");
-    expect(secrets).toEqual(["github-example", "environment-example"]);
+    expect(inputs.telegraphPrivateKey).toBe(`0x${"e".repeat(64)}`);
+    expect(secrets).toEqual(["github-example", `0x${"e".repeat(64)}`]);
   });
 
   it("passes Action inputs through Telegraph configuration validation", () => {

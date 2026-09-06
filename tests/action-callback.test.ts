@@ -1,11 +1,13 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 import {
+  reportLimenIntegrationFault,
   reportLimenEvaluation,
   type LimenCallbackDependencies,
 } from "../action/src/limen-callback";
-import { applyActionOutcome, type ActionOutcomeRuntime } from "../action/src/main";
-import { parseLimenApiUrl, readActionInputs } from "../action/src/inputs";
+import { applyActionOutcome, isDeterministicConfigurationError, type ActionOutcomeRuntime } from "../action/src/main";
+import { parseLimenApiUrl, readActionInputs, readOptionalLimenApiUrl } from "../action/src/inputs";
+import { ConfigurationError } from "../packages/core/src";
 import type { LimenRunResult } from "../action/src/types";
 
 const REPOSITORY_ID = 123456;
@@ -16,6 +18,17 @@ const WORKFLOW_REF =
 const CANONICAL_SHA = "a".repeat(40);
 const EVALUATED_AT = "2026-09-06T12:00:00.000Z";
 const OIDC_TOKEN = "raw-oidc-token-fixture";
+const VALID_PRIVATE_KEY = `0x${"a".repeat(64)}`;
+
+const healthCallbackInput = {
+  limenApiUrl: "https://api.example.test",
+  repositoryId: String(REPOSITORY_ID),
+  githubRunId: String(RUN_ID),
+  githubRunAttempt: String(RUN_ATTEMPT),
+  workflowRef: WORKFLOW_REF,
+  code: "CONFIGURATION_INVALID" as const,
+  observedAt: EVALUATED_AT,
+};
 
 const callbackInput = {
   limenApiUrl: "https://api.example.test",
@@ -97,7 +110,7 @@ describe("Limen API callback input", () => {
   it("parses the callback URL through the existing Action input reader", () => {
     const values: Record<string, string> = {
       "github-token": "github-token-fixture",
-      "telegraph-private-key": "",
+      "telegraph-private-key": VALID_PRIVATE_KEY,
       "telegraph-engine-url": "",
       "expected-network": "",
       "max-lookups": "5",
@@ -109,6 +122,41 @@ describe("Limen API callback input", () => {
     }, {});
 
     expect(inputs.limenApiUrl).toBe("https://api.example.test");
+  });
+
+  it("reads only the optional callback URL before full input validation", () => {
+    expect(readOptionalLimenApiUrl({ getInput: (name) => name === "limen-api-url" ? "https://api.example.test" : "" }))
+      .toBe("https://api.example.test");
+  });
+
+  it.each([
+    ["missing", "", {}],
+    ["malformed", "telegraph-private-key-fixture", {}],
+  ] as const)("classifies %s Telegraph private key as deterministic configuration failure without leaking it", (_label, key, environment) => {
+    const values: Record<string, string> = {
+      "github-token": "github-token-fixture",
+      "telegraph-private-key": key,
+      "telegraph-engine-url": "",
+      "expected-network": "",
+      "max-lookups": "5",
+      "limen-api-url": "https://api.example.test",
+    };
+
+    expect(() => readActionInputs({
+      getInput: (name) => values[name] ?? "",
+      setSecret: () => undefined,
+    }, environment)).toThrow(ConfigurationError);
+    try {
+      readActionInputs({
+        getInput: (name) => values[name] ?? "",
+        setSecret: () => undefined,
+      }, environment);
+    } catch (error) {
+      if (key !== "") {
+        expect(String(error)).not.toContain(key);
+      }
+      expect(isDeterministicConfigurationError(error)).toBe(true);
+    }
   });
 
   it("exposes the optional callback input without adding an API secret", async () => {
@@ -246,6 +294,57 @@ describe("Limen OIDC evaluation callback", () => {
   });
 });
 
+describe("Limen integration health callback", () => {
+  it("does nothing when limen-api-url is absent", async () => {
+    const getIDToken = vi.fn().mockResolvedValue(OIDC_TOKEN);
+    const fetchImpl = vi.fn<typeof fetch>();
+
+    await expect(reportLimenIntegrationFault(
+      { ...healthCallbackInput, limenApiUrl: undefined },
+      callbackDependencies(fetchImpl, getIDToken),
+    )).resolves.toEqual({ status: "disabled" });
+    expect(getIDToken).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("requests the limen-api OIDC audience and posts only CONFIGURATION_INVALID health data", async () => {
+    const getIDToken = vi.fn().mockResolvedValue(OIDC_TOKEN);
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response("", { status: 200 }));
+
+    await expect(reportLimenIntegrationFault(healthCallbackInput, callbackDependencies(fetchImpl, getIDToken)))
+      .resolves.toEqual({ status: "reported" });
+    expect(getIDToken).toHaveBeenCalledOnce();
+    expect(getIDToken).toHaveBeenCalledWith("limen-api");
+    expect(fetchImpl).toHaveBeenCalledOnce();
+
+    const [url, request] = fetchImpl.mock.calls[0] ?? [];
+    expect(url).toBe("https://api.example.test/v1/github/integration-health");
+    expect(request?.method).toBe("POST");
+    expect(JSON.parse(String(request?.body))).toEqual({
+      repositoryId: REPOSITORY_ID,
+      githubRunId: RUN_ID,
+      githubRunAttempt: RUN_ATTEMPT,
+      workflowRef: WORKFLOW_REF,
+      code: "CONFIGURATION_INVALID",
+      observedAt: EVALUATED_AT,
+    });
+    expect(String(request?.body)).not.toContain(OIDC_TOKEN);
+    expect(String(request?.body)).not.toMatch(/PASS|HOLD|REVIEW/);
+    expect(String(request?.body)).not.toContain("telegraph-private-key-fixture");
+    expect(JSON.stringify(await reportLimenIntegrationFault(healthCallbackInput, callbackDependencies(fetchImpl, getIDToken))))
+      .not.toContain(OIDC_TOKEN);
+  });
+
+  it("preserves the original configuration failure when health reporting fails", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockRejectedValue(new Error("private-health-error"));
+    const result = await reportLimenIntegrationFault(healthCallbackInput, callbackDependencies(fetchImpl));
+
+    expect(result).toMatchObject({ status: "failed" });
+    expect(JSON.stringify(result)).not.toContain("private-health-error");
+    expect(JSON.stringify(result)).not.toContain(OIDC_TOKEN);
+  });
+});
+
 describe("callback timing and legacy Action outcomes", () => {
   it("is inserted after canonical result/receipt handling and before final outcome handling", async () => {
     const source = await readFile("action/src/main.ts", "utf8");
@@ -258,6 +357,9 @@ describe("callback timing and legacy Action outcomes", () => {
     expect(callbackIndex).toBeLessThan(outcomeIndex);
     expect(source).toContain("decision: outputResult.overallDecision");
     expect(source).toContain("commitSha: outputResult.headSha");
+    expect(source).toContain("reportLimenIntegrationFault");
+    expect(source).toContain("CONFIGURATION_INVALID");
+    expect(source).toContain("readOptionalLimenApiUrl");
   });
 
   it.each([

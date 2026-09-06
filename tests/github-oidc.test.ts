@@ -112,6 +112,15 @@ const EVALUATION_BODY = {
   evaluatedAt: "2026-09-06T00:00:00.000Z",
 };
 
+const HEALTH_BODY = {
+  repositoryId: REPOSITORY_ID,
+  githubRunId: RUN_ID,
+  githubRunAttempt: RUN_ATTEMPT,
+  workflowRef: WORKFLOW_REF,
+  code: "CONFIGURATION_INVALID" as const,
+  observedAt: "2026-09-06T00:00:00.000Z",
+};
+
 const EVALUATION_REPOSITORY = {
   repositoryId: REPOSITORY_ID,
   fullName: "kaelah971/limen-demo",
@@ -147,7 +156,9 @@ class FakeEvaluationStore {
   repository: FakeEvaluationRepository | null = { ...EVALUATION_REPOSITORY };
   readonly recordedInputs: Record<string, unknown>[] = [];
   readonly evaluations: Record<string, unknown>[] = [];
+  readonly healthInputs: Record<string, unknown>[] = [];
   recordError: Error | undefined;
+  healthError: Error | undefined;
 
   async getEvaluationRepository(repositoryId: number) {
     return this.repository?.repositoryId === repositoryId ? this.repository : null;
@@ -161,6 +172,16 @@ class FakeEvaluationStore {
     const evaluation = { id: "evaluation-1", ...input };
     this.evaluations.push(evaluation);
     return evaluation;
+  }
+
+  async markRepositoryNeedsAttention(input: Record<string, unknown>) {
+    if (this.healthError !== undefined) {
+      throw this.healthError;
+    }
+    this.healthInputs.push(input);
+    if (this.repository !== null) {
+      this.repository.lifecycleState = "NEEDS_ATTENTION";
+    }
   }
 }
 
@@ -200,6 +221,43 @@ async function postEvaluation(
   token: string | null = OIDC_TOKEN,
 ): Promise<Response> {
   return fetch(`${url}/v1/github/evaluations`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...(token === null ? {} : { authorization: `Bearer ${token}` }),
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+async function startHealthServer(
+  store: FakeEvaluationStore,
+  verifier = verifierFor(),
+): Promise<string> {
+  const server = createLedgerServer({
+    ledger: {
+      persistRun: async () => ({ id: "LM-RUN-OIDC-HEALTH-TEST", created: true }),
+      getRun: async () => null,
+    },
+    ingestToken: "ingest-secret",
+    githubIntegrationHealthApi: {
+      store,
+      oidcAudience: OIDC_AUDIENCE,
+      oidcVerifier: verifier,
+    },
+  } as never);
+  evaluationServers.push(server);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  const address = server.address() as { port: number };
+  return `http://127.0.0.1:${address.port}`;
+}
+
+async function postHealth(
+  url: string,
+  body: unknown = HEALTH_BODY,
+  token: string | null = OIDC_TOKEN,
+): Promise<Response> {
+  return fetch(`${url}/v1/github/integration-health`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -457,5 +515,138 @@ describe("GitHub Actions evaluation endpoint", () => {
     expect(body).not.toContain(OIDC_TOKEN);
     expect(body).not.toContain("provider-token-fixture");
     expect(body).not.toContain("private-key-fixture");
+  });
+});
+
+describe("GitHub Actions integration health endpoint", () => {
+  it.each(["CONFIGURED", "VERIFIED"] as const)("accepts CONFIGURATION_INVALID from %s and transitions the repository without recording an evaluation", async (lifecycleState) => {
+    const store = new FakeEvaluationStore();
+    store.repository = { ...EVALUATION_REPOSITORY, lifecycleState };
+    const url = await startHealthServer(store);
+
+    const response = await postHealth(url);
+    const body = await response.json() as Record<string, unknown>;
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ accepted: true, repositoryId: REPOSITORY_ID, lifecycleState: "NEEDS_ATTENTION" });
+    expect(store.healthInputs).toEqual([{ repositoryId: REPOSITORY_ID, observedAt: HEALTH_BODY.observedAt }]);
+    expect(store.recordedInputs).toHaveLength(0);
+    expect(JSON.stringify(body)).not.toMatch(/PASS|HOLD|REVIEW/);
+  });
+
+  it("is idempotent for a repository already needing attention", async () => {
+    const store = new FakeEvaluationStore();
+    store.repository = { ...EVALUATION_REPOSITORY, lifecycleState: "NEEDS_ATTENTION" };
+    const url = await startHealthServer(store);
+
+    const first = await postHealth(url);
+    const second = await postHealth(url);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(store.repository?.lifecycleState).toBe("NEEDS_ATTENTION");
+    expect(store.recordedInputs).toHaveLength(0);
+  });
+
+  it.each([
+    ["missing authorization", null, 401],
+    ["malformed authorization", "Basic credentials", 401],
+  ] as const)("rejects %s before persistence", async (_label, token, status) => {
+    const store = new FakeEvaluationStore();
+    const url = await startHealthServer(store);
+
+    const response = await postHealth(url, HEALTH_BODY, token);
+
+    expect(response.status).toBe(status);
+    expect(store.healthInputs).toHaveLength(0);
+  });
+
+  it.each([
+    ["repository ID", { repositoryId: REPOSITORY_ID + 1 }],
+    ["run ID", { githubRunId: RUN_ID + 1 }],
+    ["run attempt", { githubRunAttempt: RUN_ATTEMPT + 1 }],
+    ["workflow ref", { workflowRef: `${WORKFLOW_REF}-mismatch` }],
+  ] as const)("rejects JWT/body %s mismatch", async (_label, override) => {
+    const store = new FakeEvaluationStore();
+    const url = await startHealthServer(store);
+
+    const response = await postHealth(url, { ...HEALTH_BODY, ...override });
+
+    expect(response.status).toBe(403);
+    expect(store.healthInputs).toHaveLength(0);
+  });
+
+  it("rejects a JWT repository that does not match the stored repository", async () => {
+    const store = new FakeEvaluationStore();
+    store.repository = { ...EVALUATION_REPOSITORY, fullName: "other-owner/other-repository" };
+    const url = await startHealthServer(store);
+
+    const response = await postHealth(url);
+
+    expect(response.status).toBe(403);
+    expect(store.healthInputs).toHaveLength(0);
+  });
+
+  it.each([
+    ["unknown repository", null, 404, undefined],
+    ["disconnected installation", { ...EVALUATION_REPOSITORY, installationConnectionState: "DISCONNECTED" as const }, 409, "GITHUB_INSTALLATION_DISCONNECTED"],
+    ["disconnected repository", { ...EVALUATION_REPOSITORY, lifecycleState: "DISCONNECTED" as const }, 409, "GITHUB_REPOSITORY_DISCONNECTED"],
+    ["setup required repository", { ...EVALUATION_REPOSITORY, lifecycleState: "SETUP_REQUIRED" as const }, 409, "GITHUB_REPOSITORY_NOT_READY"],
+    ["setup PR open repository", { ...EVALUATION_REPOSITORY, lifecycleState: "SETUP_PR_OPEN" as const }, 409, "GITHUB_REPOSITORY_NOT_READY"],
+  ] as const)("rejects %s", async (_label, repository, status, code) => {
+    const store = new FakeEvaluationStore();
+    store.repository = repository;
+    const url = await startHealthServer(store);
+
+    const response = await postHealth(url);
+    const body = await response.json() as { code?: string };
+
+    expect(response.status).toBe(status);
+    if (code !== undefined) {
+      expect(body.code).toBe(code);
+    }
+    expect(store.healthInputs).toHaveLength(0);
+  });
+
+  it("accepts only the exact health body and code", async () => {
+    const store = new FakeEvaluationStore();
+    const url = await startHealthServer(store);
+
+    const response = await postHealth(url, { ...HEALTH_BODY, decision: "REVIEW", unexpected: "secret" });
+    const body = JSON.stringify(await response.json());
+
+    expect(response.status).toBe(400);
+    expect(body).not.toContain("secret");
+    expect(store.healthInputs).toHaveLength(0);
+  });
+
+  it("does not expose OIDC or provider fixture values in health errors", async () => {
+    const store = new FakeEvaluationStore();
+    const verifier = vi.fn(async () => {
+      throw new Error("provider-token-fixture private-key-fixture");
+    });
+    const url = await startHealthServer(store, verifier);
+
+    const response = await postHealth(url);
+    const body = JSON.stringify(await response.json());
+
+    expect(response.status).toBe(401);
+    expect(body).not.toContain(OIDC_TOKEN);
+    expect(body).not.toContain("provider-token-fixture");
+    expect(body).not.toContain("private-key-fixture");
+  });
+
+  it("maps an unexpected store failure to a sanitized 500", async () => {
+    const store = new FakeEvaluationStore();
+    store.healthError = new Error("supabase-service-role-key provider-payload");
+    const url = await startHealthServer(store);
+
+    const response = await postHealth(url);
+    const body = JSON.stringify(await response.json());
+
+    expect(response.status).toBe(500);
+    expect(body).toContain("GITHUB_INTEGRATION_HEALTH_INTERNAL_ERROR");
+    expect(body).not.toContain("supabase-service-role-key");
+    expect(body).not.toContain("provider-payload");
   });
 });

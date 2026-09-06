@@ -35,10 +35,12 @@ import {
 import {
   handleGitHubInstallationBind,
   handleGitHubEvaluation,
+  handleGitHubIntegrationHealth,
   handleGitHubRepositoryRequest,
   handleGitHubWebhook,
   type GitHubInstallationBindRouteOptions,
   type GitHubEvaluationRouteOptions,
+  type GitHubIntegrationHealthRouteOptions,
   type GitHubRepositoryRouteOptions,
   type GitHubWebhookRouteOptions,
 } from "./github-app-routes";
@@ -52,6 +54,7 @@ export interface LedgerServerOptions {
   githubWebhook?: GitHubWebhookRouteOptions;
   githubInstallationBind?: GitHubInstallationBindRouteOptions;
   githubEvaluationApi?: GitHubEvaluationRouteOptions;
+  githubIntegrationHealthApi?: GitHubIntegrationHealthRouteOptions;
   githubRepositoryApi?: GitHubRepositoryRouteOptions;
   maxBodyBytes?: number;
   observability?: LimenObservabilityLogger;
@@ -118,6 +121,9 @@ function routeTemplate(request: IncomingMessage): string {
     }
     if (path[1] === "github" && path[2] === "evaluations" && path.length === 3) {
       return "/v1/github/evaluations";
+    }
+    if (path[1] === "github" && path[2] === "integration-health" && path.length === 3) {
+      return "/v1/github/integration-health";
     }
     if (
       path[1] === "github"
@@ -419,6 +425,26 @@ async function handleRequest(
         });
       } else {
         requestStage.success({ httpStatus: evaluationResponse.status });
+      }
+      return;
+    }
+    if (request.method === "POST" && path.length === 3 && path[0] === "v1" && path[1] === "github" && path[2] === "integration-health") {
+      if (options.githubIntegrationHealthApi === undefined) {
+        throw new LedgerApiRequestError(
+          503,
+          "GITHUB_INTEGRATION_HEALTH_NOT_CONFIGURED",
+          "GitHub integration health processing is not configured.",
+        );
+      }
+      const healthResponse = await handleGitHubIntegrationHealth(request, options.githubIntegrationHealthApi);
+      sendJson(response, healthResponse.status, healthResponse.body);
+      if (healthResponse.status >= 400) {
+        requestStage.failure(undefined, {
+          httpStatus: healthResponse.status,
+          errorCode: String(healthResponse.body.code ?? "GITHUB_INTEGRATION_HEALTH_ERROR"),
+        });
+      } else {
+        requestStage.success({ httpStatus: healthResponse.status });
       }
       return;
     }

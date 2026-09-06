@@ -6,6 +6,8 @@ import type { ActionInputs } from "./types";
 
 export type ParsedActionInputs = ActionInputs & { limenApiUrl?: string };
 
+const PRIVATE_KEY_PATTERN = /^0x[0-9a-fA-F]{64}$/;
+
 export interface ActionInputReader {
   getInput(
     name: string,
@@ -72,6 +74,12 @@ export function parseLimenApiUrl(value: string): string | undefined {
   return `${url.origin}${pathname}`;
 }
 
+export function readOptionalLimenApiUrl(
+  reader: Pick<ActionInputReader, "getInput"> = actionsCore,
+): string | undefined {
+  return parseLimenApiUrl(reader.getInput("limen-api-url"));
+}
+
 export function readActionInputs(
   reader: ActionInputReader = actionsCore,
   environment: Record<string, string | undefined> = process.env,
@@ -87,13 +95,22 @@ export function readActionInputs(
   const inputPrivateKey = reader.getInput("telegraph-private-key").trim();
   const environmentPrivateKey = environment.TELEGRAPH_PRIVATE_KEY?.trim();
   const telegraphPrivateKey = inputPrivateKey || environmentPrivateKey || undefined;
-  if (telegraphPrivateKey !== undefined) {
-    reader.setSecret(telegraphPrivateKey);
+  if (telegraphPrivateKey === undefined || !PRIVATE_KEY_PATTERN.test(telegraphPrivateKey)) {
+    throw new ConfigurationError(
+      "TELEGRAPH_PRIVATE_KEY is required and must be a 32-byte hexadecimal private key.",
+      {
+        field: "TELEGRAPH_PRIVATE_KEY",
+        trimmedLength: telegraphPrivateKey?.length ?? 0,
+        matchesRequiredPattern: telegraphPrivateKey !== undefined
+          && PRIVATE_KEY_PATTERN.test(telegraphPrivateKey),
+      },
+    );
   }
+  reader.setSecret(telegraphPrivateKey);
 
   const inputEngineUrl = reader.getInput("telegraph-engine-url").trim();
   const inputNetwork = reader.getInput("expected-network").trim();
-  const inputLimenApiUrl = parseLimenApiUrl(reader.getInput("limen-api-url"));
+  const inputLimenApiUrl = readOptionalLimenApiUrl(reader);
   const inputLedgerUrl = reader.getInput("ledger-url").trim();
   const inputLedgerToken = reader.getInput("ledger-token").trim();
   const inputUsageClass = reader.getInput("usage-class").trim();

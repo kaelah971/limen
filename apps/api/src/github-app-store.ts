@@ -80,9 +80,19 @@ export interface GitHubEvaluationRecord extends GitHubEvaluationInput {
   id: string;
 }
 
+export interface GitHubIntegrationHealthInput {
+  repositoryId: number;
+  observedAt: string;
+}
+
 export interface GitHubEvaluationStore {
   getEvaluationRepository(repositoryId: number): Promise<GitHubEvaluationRepositoryRecord | null>;
   recordGitHubEvaluation(input: GitHubEvaluationInput): Promise<GitHubEvaluationRecord>;
+}
+
+export interface GitHubIntegrationHealthStore {
+  getEvaluationRepository(repositoryId: number): Promise<GitHubEvaluationRepositoryRecord | null>;
+  markRepositoryNeedsAttention(input: GitHubIntegrationHealthInput): Promise<void>;
 }
 
 export interface GitHubRepositoryStore extends GitHubInstallationAuthorizationStore, SetupPersistence {
@@ -195,6 +205,24 @@ export class GitHubEvaluationPersistenceError extends Error {
   constructor(code: GitHubEvaluationPersistenceErrorCode, message: string) {
     super(message);
     this.name = "GitHubEvaluationPersistenceError";
+    this.code = code;
+  }
+}
+
+export type GitHubIntegrationHealthPersistenceErrorCode =
+  | "GITHUB_REPOSITORY_NOT_FOUND"
+  | "GITHUB_INSTALLATION_DISCONNECTED"
+  | "GITHUB_REPOSITORY_DISCONNECTED"
+  | "GITHUB_REPOSITORY_NOT_READY"
+  | "GITHUB_INTEGRATION_HEALTH_INPUT_INVALID"
+  | "GITHUB_INTEGRATION_HEALTH_PERSISTENCE_ERROR";
+
+export class GitHubIntegrationHealthPersistenceError extends Error {
+  readonly code: GitHubIntegrationHealthPersistenceErrorCode;
+
+  constructor(code: GitHubIntegrationHealthPersistenceErrorCode, message: string) {
+    super(message);
+    this.name = "GitHubIntegrationHealthPersistenceError";
     this.code = code;
   }
 }
@@ -466,7 +494,8 @@ function mapGitHubEvaluationPersistenceError(error: unknown): GitHubEvaluationPe
 export class SupabaseGitHubAppStore implements
   GitHubAppStore,
   GitHubInstallationAuthorizationStore,
-  GitHubEvaluationStore {
+  GitHubEvaluationStore,
+  GitHubIntegrationHealthStore {
   constructor(private readonly client: SupabaseClient) {}
 
   async getEvaluationRepository(
@@ -547,6 +576,64 @@ export class SupabaseGitHubAppStore implements
       throw new GitHubEvaluationPersistenceError(
         "GITHUB_EVALUATION_PERSISTENCE_ERROR",
         "The GitHub evaluation could not be recorded.",
+      );
+    }
+  }
+
+  async markRepositoryNeedsAttention(
+    input: GitHubIntegrationHealthInput,
+  ): Promise<void> {
+    if (
+      !Number.isSafeInteger(input.repositoryId)
+      || input.repositoryId <= 0
+      || typeof input.observedAt !== "string"
+      || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(input.observedAt)
+      || Number.isNaN(Date.parse(input.observedAt))
+    ) {
+      throw new GitHubIntegrationHealthPersistenceError(
+        "GITHUB_INTEGRATION_HEALTH_INPUT_INVALID",
+        "The GitHub integration health input is invalid.",
+      );
+    }
+
+    let result: { data: unknown; error: unknown };
+    try {
+      result = await this.client
+        .from("github_repositories")
+        .update({
+          lifecycle_state: "NEEDS_ATTENTION",
+          updated_at: input.observedAt,
+        })
+        .eq("repository_id", input.repositoryId)
+        .in("lifecycle_state", ["CONFIGURED", "VERIFIED", "NEEDS_ATTENTION"])
+        .select("repository_id, lifecycle_state")
+        .maybeSingle();
+    } catch {
+      throw new GitHubIntegrationHealthPersistenceError(
+        "GITHUB_INTEGRATION_HEALTH_PERSISTENCE_ERROR",
+        "The GitHub integration health state could not be recorded.",
+      );
+    }
+    if (result.error !== null) {
+      throw new GitHubIntegrationHealthPersistenceError(
+        "GITHUB_INTEGRATION_HEALTH_PERSISTENCE_ERROR",
+        "The GitHub integration health state could not be recorded.",
+      );
+    }
+    const row = objectRow(result.data);
+    if (result.data === null) {
+      throw new GitHubIntegrationHealthPersistenceError(
+        "GITHUB_REPOSITORY_NOT_READY",
+        "The GitHub repository is not ready to accept integration health reports.",
+      );
+    }
+    if (
+      numericValue(row.repository_id) !== input.repositoryId
+      || row.lifecycle_state !== "NEEDS_ATTENTION"
+    ) {
+      throw new GitHubIntegrationHealthPersistenceError(
+        "GITHUB_INTEGRATION_HEALTH_PERSISTENCE_ERROR",
+        "The GitHub integration health state could not be recorded.",
       );
     }
   }

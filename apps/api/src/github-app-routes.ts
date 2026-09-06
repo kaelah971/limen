@@ -16,10 +16,13 @@ import {
   GitHubInstallationDisconnectedError,
   GitHubInstallationNotConfirmedError,
   GitHubEvaluationPersistenceError,
+  GitHubIntegrationHealthPersistenceError,
   GitHubRepositoryStore,
   GitHubSetupPersistenceError,
   type GitHubEvaluationInput,
   type GitHubEvaluationStore,
+  type GitHubIntegrationHealthInput,
+  type GitHubIntegrationHealthStore,
 } from "./github-app-store";
 import type {
   GitHubAppStore,
@@ -43,6 +46,7 @@ import {
 
 export const GITHUB_WEBHOOK_MAX_BODY_BYTES = 2 * 1024 * 1024;
 export const GITHUB_EVALUATION_MAX_BODY_BYTES = 2 * 1024 * 1024;
+export const GITHUB_INTEGRATION_HEALTH_MAX_BODY_BYTES = 2 * 1024 * 1024;
 
 export interface GitHubWebhookRouteOptions {
   secret: string;
@@ -89,6 +93,18 @@ export interface GitHubEvaluationHttpResponse {
   body: Record<string, unknown>;
 }
 
+export interface GitHubIntegrationHealthRouteOptions {
+  store: GitHubIntegrationHealthStore;
+  oidcAudience: string;
+  oidcVerifier?: GitHubActionsOidcVerifier;
+  maxBodyBytes?: number;
+}
+
+export interface GitHubIntegrationHealthHttpResponse {
+  status: number;
+  body: Record<string, unknown>;
+}
+
 class GitHubWebhookRequestError extends Error {
   readonly status: number;
   readonly code: string;
@@ -120,6 +136,18 @@ class GitHubEvaluationRequestError extends Error {
   constructor(status: number, code: string, message: string) {
     super(message);
     this.name = "GitHubEvaluationRequestError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+class GitHubIntegrationHealthRequestError extends Error {
+  readonly status: number;
+  readonly code: string;
+
+  constructor(status: number, code: string, message: string) {
+    super(message);
+    this.name = "GitHubIntegrationHealthRequestError";
     this.status = status;
     this.code = code;
   }
@@ -701,6 +729,157 @@ function evaluationBearerToken(request: IncomingMessage): string {
   return token;
 }
 
+interface GitHubIntegrationHealthRequest extends GitHubIntegrationHealthInput {
+  githubRunId: number;
+  githubRunAttempt: number;
+  workflowRef: string;
+  code: "CONFIGURATION_INVALID";
+}
+
+function healthRequestError(
+  status: number,
+  code: string,
+  message: string,
+): GitHubIntegrationHealthRequestError {
+  return new GitHubIntegrationHealthRequestError(status, code, message);
+}
+
+function healthObjectValue(value: unknown): Record<string, unknown> {
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  throw healthRequestError(
+    400,
+    "GITHUB_INTEGRATION_HEALTH_INVALID_REQUEST",
+    "The GitHub integration health request is invalid.",
+  );
+}
+
+function healthPositiveInteger(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+    throw healthRequestError(
+      400,
+      "GITHUB_INTEGRATION_HEALTH_INVALID_REQUEST",
+      `The GitHub integration health field ${field} is invalid.`,
+    );
+  }
+  return value;
+}
+
+function healthText(value: unknown, field: string, maxLength: number): string {
+  if (
+    typeof value !== "string"
+    || value.length === 0
+    || value.length > maxLength
+    || /[\u0000-\u001f\u007f]/.test(value)
+  ) {
+    throw healthRequestError(
+      400,
+      "GITHUB_INTEGRATION_HEALTH_INVALID_REQUEST",
+      `The GitHub integration health field ${field} is invalid.`,
+    );
+  }
+  return value;
+}
+
+function healthTimestamp(value: unknown): string {
+  const timestamp = healthText(value, "observedAt", 64);
+  if (
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(timestamp)
+    || Number.isNaN(Date.parse(timestamp))
+  ) {
+    throw healthRequestError(
+      400,
+      "GITHUB_INTEGRATION_HEALTH_INVALID_REQUEST",
+      "The GitHub integration health timestamp is invalid.",
+    );
+  }
+  return timestamp;
+}
+
+function healthInput(value: unknown): GitHubIntegrationHealthRequest {
+  const body = healthObjectValue(value);
+  const fields = new Set([
+    "repositoryId",
+    "githubRunId",
+    "githubRunAttempt",
+    "workflowRef",
+    "code",
+    "observedAt",
+  ]);
+  if (Object.keys(body).some((key) => !fields.has(key))) {
+    throw healthRequestError(
+      400,
+      "GITHUB_INTEGRATION_HEALTH_INVALID_REQUEST",
+      "The GitHub integration health request contains unsupported fields.",
+    );
+  }
+  if (body.code !== "CONFIGURATION_INVALID") {
+    throw healthRequestError(
+      400,
+      "GITHUB_INTEGRATION_HEALTH_INVALID_REQUEST",
+      "The GitHub integration health code is invalid.",
+    );
+  }
+  return {
+    repositoryId: healthPositiveInteger(body.repositoryId, "repositoryId"),
+    githubRunId: healthPositiveInteger(body.githubRunId, "githubRunId"),
+    githubRunAttempt: healthPositiveInteger(body.githubRunAttempt, "githubRunAttempt"),
+    workflowRef: healthText(body.workflowRef, "workflowRef", 700),
+    code: "CONFIGURATION_INVALID",
+    observedAt: healthTimestamp(body.observedAt),
+  };
+}
+
+async function readHealthBody(
+  request: IncomingMessage,
+  maxBodyBytes: number,
+): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (size > maxBodyBytes) {
+      throw healthRequestError(
+        413,
+        "GITHUB_INTEGRATION_HEALTH_PAYLOAD_TOO_LARGE",
+        "The GitHub integration health payload is too large.",
+      );
+    }
+    chunks.push(buffer);
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks, size).toString("utf8")) as unknown;
+  } catch {
+    throw healthRequestError(
+      400,
+      "GITHUB_INTEGRATION_HEALTH_INVALID_JSON",
+      "The GitHub integration health payload must be valid JSON.",
+    );
+  }
+}
+
+function healthBearerToken(request: IncomingMessage): string {
+  const authorization = headerValue(request, "authorization");
+  if (authorization === undefined || !authorization.startsWith("Bearer ")) {
+    throw healthRequestError(
+      401,
+      "GITHUB_OIDC_UNAUTHORIZED",
+      "A valid GitHub Actions OIDC token is required.",
+    );
+  }
+  const token = authorization.slice("Bearer ".length);
+  if (token.length === 0 || /\s/.test(token)) {
+    throw healthRequestError(
+      401,
+      "GITHUB_OIDC_UNAUTHORIZED",
+      "A valid GitHub Actions OIDC token is required.",
+    );
+  }
+  return token;
+}
+
 function repositoryMatchesIdentity(
   repository: { fullName: string },
   identity: { repository: string },
@@ -828,6 +1007,123 @@ export async function handleGitHubEvaluation(
     return response(200, { accepted: true, evaluation });
   } catch (error) {
     return evaluationErrorResponse(error);
+  }
+}
+
+function integrationHealthErrorResponse(error: unknown): GitHubIntegrationHealthHttpResponse {
+  if (error instanceof GitHubIntegrationHealthRequestError) {
+    return response(error.status, { code: error.code, message: error.message });
+  }
+  if (error instanceof GitHubActionsOidcError) {
+    return response(401, {
+      code: error.code,
+      message: "The GitHub Actions OIDC token is invalid.",
+    });
+  }
+  if (error instanceof GitHubIntegrationHealthPersistenceError) {
+    if (error.code === "GITHUB_REPOSITORY_NOT_FOUND") {
+      return response(404, { code: error.code, message: error.message });
+    }
+    if (
+      error.code === "GITHUB_INSTALLATION_DISCONNECTED"
+      || error.code === "GITHUB_REPOSITORY_DISCONNECTED"
+      || error.code === "GITHUB_REPOSITORY_NOT_READY"
+    ) {
+      return response(409, { code: error.code, message: error.message });
+    }
+    if (error.code === "GITHUB_INTEGRATION_HEALTH_INPUT_INVALID") {
+      return response(400, { code: error.code, message: error.message });
+    }
+    return response(500, {
+      code: error.code,
+      message: "The GitHub integration health service is temporarily unavailable.",
+    });
+  }
+  if (error instanceof GitHubAppStoreError) {
+    return response(500, {
+      code: error.code,
+      message: "The GitHub integration health service is temporarily unavailable.",
+    });
+  }
+  return response(500, {
+    code: "GITHUB_INTEGRATION_HEALTH_INTERNAL_ERROR",
+    message: "The GitHub integration health report could not be recorded.",
+  });
+}
+
+export async function handleGitHubIntegrationHealth(
+  request: IncomingMessage,
+  options: GitHubIntegrationHealthRouteOptions,
+): Promise<GitHubIntegrationHealthHttpResponse> {
+  try {
+    const token = healthBearerToken(request);
+    const identity = await verifyGitHubActionsOidcToken(
+      token,
+      options.oidcAudience,
+      options.oidcVerifier,
+    );
+    const input = healthInput(
+      await readHealthBody(request, options.maxBodyBytes ?? GITHUB_INTEGRATION_HEALTH_MAX_BODY_BYTES),
+    );
+    if (
+      input.repositoryId !== identity.repositoryId
+      || input.githubRunId !== identity.runId
+      || input.githubRunAttempt !== identity.runAttempt
+      || input.workflowRef !== identity.workflowRef
+    ) {
+      return response(403, {
+        code: "GITHUB_INTEGRATION_HEALTH_CLAIM_MISMATCH",
+        message: "The GitHub integration health report does not match the OIDC claims.",
+      });
+    }
+
+    const repository = await options.store.getEvaluationRepository(input.repositoryId);
+    if (repository === null) {
+      return response(404, {
+        code: "GITHUB_REPOSITORY_NOT_FOUND",
+        message: "The GitHub repository was not found.",
+      });
+    }
+    if (!repositoryMatchesIdentity(repository, identity)) {
+      return response(403, {
+        code: "GITHUB_INTEGRATION_HEALTH_REPOSITORY_MISMATCH",
+        message: "The GitHub OIDC repository does not match the stored repository.",
+      });
+    }
+    if (repository.installationConnectionState !== "ACTIVE") {
+      return response(409, {
+        code: "GITHUB_INSTALLATION_DISCONNECTED",
+        message: "The GitHub installation is disconnected.",
+      });
+    }
+    if (repository.lifecycleState === "DISCONNECTED") {
+      return response(409, {
+        code: "GITHUB_REPOSITORY_DISCONNECTED",
+        message: "The GitHub repository is disconnected.",
+      });
+    }
+    if (
+      repository.lifecycleState !== "CONFIGURED"
+      && repository.lifecycleState !== "VERIFIED"
+      && repository.lifecycleState !== "NEEDS_ATTENTION"
+    ) {
+      return response(409, {
+        code: "GITHUB_REPOSITORY_NOT_READY",
+        message: "The GitHub repository is not ready to accept integration health reports.",
+      });
+    }
+
+    await options.store.markRepositoryNeedsAttention({
+      repositoryId: input.repositoryId,
+      observedAt: input.observedAt,
+    });
+    return response(200, {
+      accepted: true,
+      repositoryId: input.repositoryId,
+      lifecycleState: "NEEDS_ATTENTION",
+    });
+  } catch (error) {
+    return integrationHealthErrorResponse(error);
   }
 }
 

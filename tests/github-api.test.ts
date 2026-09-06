@@ -10,6 +10,7 @@ import {
   GitHubInstallationAlreadyBoundError,
   GitHubInstallationDisconnectedError,
   GitHubInstallationNotConfirmedError,
+  SupabaseGitHubAppStore,
 } from "../apps/api/src/github-app-store";
 import {
   authenticateUser,
@@ -135,6 +136,45 @@ describe("atomic setup PR persistence migration", () => {
       /grant execute on function public\.record_github_setup_pr_and_transition\s*\(bigint, bigint, text, text\)\s+to\s+service_role/i,
     );
     expect(normalized).not.toMatch(/(private_key|installation_token|telegraph_private_key|access_token|refresh_token|oauth_token)/i);
+  });
+});
+
+describe("GitHub integration health persistence", () => {
+  it("updates only lifecycle state and updated_at", async () => {
+    const query = {
+      update: vi.fn(),
+      eq: vi.fn(),
+      in: vi.fn(),
+      select: vi.fn(),
+      maybeSingle: vi.fn(),
+    };
+    query.update.mockReturnValue(query);
+    query.eq.mockReturnValue(query);
+    query.in.mockReturnValue(query);
+    query.select.mockReturnValue(query);
+    query.maybeSingle.mockResolvedValue({
+      data: { repository_id: 123456, lifecycle_state: "NEEDS_ATTENTION" },
+      error: null,
+    });
+
+    const client = { from: vi.fn(() => query) };
+    const store = new SupabaseGitHubAppStore(client as never);
+    const observedAt = "2026-09-06T00:00:00.000Z";
+
+    await expect(store.markRepositoryNeedsAttention({
+      repositoryId: 123456,
+      observedAt,
+    })).resolves.toBeUndefined();
+
+    expect(client.from).toHaveBeenCalledWith("github_repositories");
+    expect(query.update).toHaveBeenCalledWith({
+      lifecycle_state: "NEEDS_ATTENTION",
+      updated_at: observedAt,
+    });
+    expect(query.eq).toHaveBeenCalledWith("repository_id", 123456);
+    expect(query.in).toHaveBeenCalledWith("lifecycle_state", ["CONFIGURED", "VERIFIED", "NEEDS_ATTENTION"]);
+    expect(query.update.mock.calls[0]?.[0]).not.toHaveProperty("latest_decision");
+    expect(query.update.mock.calls[0]?.[0]).not.toHaveProperty("latest_evaluation_at");
   });
 });
 
