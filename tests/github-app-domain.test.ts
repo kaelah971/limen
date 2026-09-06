@@ -1,4 +1,6 @@
+import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
+import { loadGitHubAppDeploymentConfig } from "../apps/api/src/config";
 import {
   GitHubAppStateError,
   REPOSITORY_LIFECYCLE_STATES,
@@ -19,6 +21,13 @@ const VALID_ENVIRONMENT: Record<string, string | undefined> = {
   GITHUB_APP_PRIVATE_KEY: ESCAPED_PRIVATE_KEY,
   GITHUB_WEBHOOK_SECRET: WEBHOOK_SECRET,
   LIMEN_ACTION_SHA: ACTION_SHA,
+};
+
+const VALID_DEPLOYMENT_ENVIRONMENT: Record<string, string | undefined> = {
+  ...VALID_ENVIRONMENT,
+  SUPABASE_URL: "https://limen.supabase.co",
+  SUPABASE_SERVICE_ROLE_KEY: "service-role-secret",
+  LIMEN_PUBLIC_API_URL: "https://api.limen.example",
 };
 
 function environmentWith(
@@ -139,5 +148,50 @@ describe("GitHub App configuration", () => {
     expect(privateKeyMessage).not.toContain("private-key-value");
     expect(webhookSecretMessage).toContain("GITHUB_WEBHOOK_SECRET");
     expect(webhookSecretMessage).not.toContain("webhook-secret-value");
+  });
+});
+
+describe("GitHub App deployment configuration", () => {
+  it("composes server-only GitHub, Supabase, and public API configuration", () => {
+    expect(loadGitHubAppDeploymentConfig(VALID_DEPLOYMENT_ENVIRONMENT)).toEqual({
+      githubApp: {
+        appId: 12345,
+        appSlug: "limen",
+        privateKey: NORMALIZED_PRIVATE_KEY,
+        webhookSecret: WEBHOOK_SECRET,
+        oidcAudience: "limen-api",
+        actionSha: ACTION_SHA,
+      },
+      supabaseUrl: "https://limen.supabase.co",
+      supabaseServiceRoleKey: "service-role-secret",
+      publicApiUrl: "https://api.limen.example",
+    });
+  });
+
+  it.each(["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "LIMEN_PUBLIC_API_URL"])(
+    "requires %s without echoing its value",
+    (key) => {
+      const environment = { ...VALID_DEPLOYMENT_ENVIRONMENT };
+      delete environment[key];
+
+      expect(() => loadGitHubAppDeploymentConfig(environment)).toThrow();
+    },
+  );
+
+  it("rejects non-HTTPS public API URLs outside localhost development", () => {
+    expect(() => loadGitHubAppDeploymentConfig({
+      ...VALID_DEPLOYMENT_ENVIRONMENT,
+      LIMEN_PUBLIC_API_URL: "http://api.limen.example",
+    })).toThrow(/LIMEN_PUBLIC_API_URL/);
+  });
+
+  it("uses the canonical public web environment names", async () => {
+    const environmentExample = await readFile(".env.example", "utf8");
+
+    expect(environmentExample).toContain("NEXT_PUBLIC_SUPABASE_URL=");
+    expect(environmentExample).toContain("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=");
+    expect(environmentExample).toContain("NEXT_PUBLIC_GITHUB_APP_SLUG=");
+    expect(environmentExample).not.toContain("NEXT_PUBLIC_SUPABASE_ANON_KEY");
+    expect(environmentExample).not.toContain("NEXT_PUBLIC_LIMEN_API_URL");
   });
 });

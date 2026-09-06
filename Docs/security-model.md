@@ -52,6 +52,22 @@ Public receipts contain a tamper-evident SHA-256 snapshot hash. The hash is an i
 
 The web app sends basic security headers including `nosniff`, strict-origin referrer policy, `frame-ancestors 'none'`, and a conservative same-origin Content Security Policy. Cheap policy and provider response size bounds are enforced. Cross-run spending budgets, tenant authorization, full rate limiting/DoS controls, signed receipts, and enterprise SIEM/WAF/HSM controls remain post-hackathon risks.
 
+## GitHub App Boundary
+
+The P18 GitHub App is an identity and setup boundary, not the release-decision engine. The App handles installation metadata, repository selection, verified webhooks, short-lived installation clients, and setup pull requests. The existing GitHub Action remains responsible for repository evidence, Telegraph lookups, policy evaluation, and the canonical `PASS`, `HOLD`, or `REVIEW` result.
+
+The setup redirect may contain an `installation_id`, but that identifier is untrusted input and never authorizes a user. Binding requires a verified active installation from signed webhook state, an authenticated Limen user, and a matching `installed_by_github_user_id`. Repository APIs authorize through that durable installation binding, preventing cross-repository and cross-installation access.
+
+Webhook requests are verified over the raw body with `X-Hub-Signature-256` before JSON parsing. The handler requires GitHub delivery and event headers and deduplicates durable delivery IDs before state mutation. Invalid signatures are rejected, duplicate deliveries are safe no-ops, and uninstall or repository-removal events immediately mark affected records `DISCONNECTED`.
+
+GitHub App JWTs and installation access tokens are server-only, short-lived, and held only for the operation that needs them. They are never stored in Supabase, cookies, logs, response objects, or browser bundles. The App private key and webhook secret are loaded only from server deployment variables and are never included in validation errors or public diagnostics.
+
+Setup writes are limited to an isolated branch and pull request. Limen never commits directly to the default branch, never overwrites existing setup files, and requests `Workflows: write` only because the setup PR creates `.github/workflows/limen.yml`. The App does not receive repository secrets; `LIMEN_TELEGRAPH_PRIVATE_KEY` remains an adopter-owned GitHub Actions Secret, and `TELEGRAPH_ENGINE_URL` remains an adopter-owned repository Variable.
+
+GitHub Actions OIDC callbacks require the exact GitHub issuer, configured `limen-api` audience, repository and repository ID, workflow reference, run identity, active connected repository, and matching request body. Mismatched or spoofed claims are rejected. Disconnect checks run before setup, integration-health, and evaluation operations so stale callbacks cannot reactivate or mutate disconnected repositories. Accepted sanitized evaluation history remains available for authorized audit views.
+
+The canonical deployment names are `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, `LIMEN_GITHUB_OIDC_AUDIENCE`, `LIMEN_ACTION_SHA`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `LIMEN_PUBLIC_API_URL` on the server side. Public web configuration uses `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, and `NEXT_PUBLIC_GITHUB_APP_SLUG`. Legacy aliases such as `NEXT_PUBLIC_SUPABASE_ANON_KEY` and `NEXT_PUBLIC_LIMEN_API_URL` are not part of the contract. The Limen web/API deployment contains neither the Telegraph private key nor an adopter-specific `TELEGRAPH_ENGINE_URL`; the generated P18 workflow must use the adopter's GitHub repository Variable.
+
 ## Future Controls
 
 P1, P3, and P5 ensure that repository policy, identity conflicts, severity conflicts, missing evidence, bounded lookup budgets, external failures, and persistence failure remain explicit and deterministic. Later GitHub App and public receipt milestones may add stronger request authenticity, tenant isolation, retention controls, and access policy without weakening the current server-only boundary.
