@@ -628,6 +628,7 @@ describe("GitHub installation authorization", () => {
 
     expect(response.status).toBe(403);
     expect(store.bindCount).toBe(0);
+    await response.text();
   });
 
   it("rejects disconnected installations", async () => {
