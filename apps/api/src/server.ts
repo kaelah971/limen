@@ -32,6 +32,10 @@ import {
   ReceiptPersistenceError,
   ReceiptRevokedError,
 } from "./receipt-repository";
+import {
+  handleGitHubWebhook,
+  type GitHubWebhookRouteOptions,
+} from "./github-app-routes";
 
 const DEFAULT_MAX_BODY_BYTES = 2 * 1024 * 1024;
 
@@ -39,6 +43,7 @@ export interface LedgerServerOptions {
   ledger: EvidenceLedger;
   ingestToken: string;
   receipts?: EvidenceReceiptStore;
+  githubWebhook?: GitHubWebhookRouteOptions;
   maxBodyBytes?: number;
   observability?: LimenObservabilityLogger;
   requestIdFactory?: () => string;
@@ -98,6 +103,9 @@ function routeTemplate(request: IncomingMessage): string {
       if (path.length === 4 && path[3] === "revoke") {
         return "/v1/receipts/:id/revoke";
       }
+    }
+    if (path[1] === "github" && path[2] === "webhooks" && path.length === 3) {
+      return "/v1/github/webhooks";
     }
     return "unknown";
   } catch {
@@ -338,6 +346,26 @@ async function handleRequest(
     if (request.method === "POST" && path.length === 4 && path[0] === "v1" && path[1] === "receipts" && path[3] === "revoke") {
       sendJson(response, 200, await revokeReceipt(request, options, path[2] ?? ""));
       requestStage.success({ httpStatus: 200 });
+      return;
+    }
+    if (request.method === "POST" && path.length === 3 && path[0] === "v1" && path[1] === "github" && path[2] === "webhooks") {
+      if (options.githubWebhook === undefined) {
+        throw new LedgerApiRequestError(
+          503,
+          "GITHUB_WEBHOOK_NOT_CONFIGURED",
+          "GitHub webhook processing is not configured.",
+        );
+      }
+      const webhookResponse = await handleGitHubWebhook(request, options.githubWebhook);
+      sendJson(response, webhookResponse.status, webhookResponse.body);
+      if (webhookResponse.status >= 400) {
+        requestStage.failure(undefined, {
+          httpStatus: webhookResponse.status,
+          errorCode: String(webhookResponse.body.code ?? "GITHUB_WEBHOOK_ERROR"),
+        });
+      } else {
+        requestStage.success({ httpStatus: webhookResponse.status });
+      }
       return;
     }
     throw new LedgerApiRequestError(404, "LEDGER_ROUTE_NOT_FOUND", "Ledger route was not found.");

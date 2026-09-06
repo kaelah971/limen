@@ -12,3 +12,5 @@ export type {
 
 export { loadGitHubAppConfig } from "./config";
 export type { GitHubAppConfig } from "./config";
+
+export { verifyGitHubWebhookSignature } from "./webhook";
