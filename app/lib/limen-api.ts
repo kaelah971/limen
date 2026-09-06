@@ -6,6 +6,17 @@ import {
 
 const MAX_RESPONSE_BYTES = 512 * 1024;
 const LOCAL_API_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+export const INTEGRATION_ERROR_CODES = [
+  "INSTALLATION_NOT_CONFIRMED",
+  "INSTALLATION_DISCONNECTED",
+  "SETUP_FILES_CONFLICT",
+  "SETUP_PR_FAILED",
+  "OIDC_REJECTED",
+  "CALLBACK_REPOSITORY_MISMATCH",
+  "CONFIGURATION_INVALID",
+] as const;
+export type IntegrationErrorCode = (typeof INTEGRATION_ERROR_CODES)[number];
+const INTEGRATION_ERROR_CODE_SET = new Set<string>(INTEGRATION_ERROR_CODES);
 const KNOWN_ERROR_CODES = new Set([
   "GITHUB_AUTH_REQUIRED",
   "GITHUB_AUTH_MALFORMED",
@@ -24,12 +35,9 @@ const KNOWN_ERROR_CODES = new Set([
   "GITHUB_SETUP_PR_ALREADY_OPEN",
   "GITHUB_SETUP_INPUT_INVALID",
   "SETUP_CONFIG_INVALID",
-  "SETUP_INSPECTION_FAILED",
-  "SETUP_GITHUB_ERROR",
-  "SETUP_PERSISTENCE_FAILED",
   "SETUP_PR_CREATED",
   "OPEN_SETUP_PR_EXISTS",
-  "ALREADY_CONFIGURED_FILES_PRESENT",
+  ...INTEGRATION_ERROR_CODES,
 ]);
 
 export type LimenApiErrorCode = string;
@@ -37,12 +45,14 @@ export type LimenApiErrorCode = string;
 export class LimenApiError extends Error {
   readonly status: number;
   readonly code: LimenApiErrorCode;
+  readonly integrationCode: IntegrationErrorCode | undefined;
 
   constructor(status: number, code: LimenApiErrorCode, message: string) {
     super(message);
     this.name = "LimenApiError";
     this.status = status;
     this.code = code;
+    this.integrationCode = isIntegrationErrorCode(code) ? code : undefined;
   }
 }
 
@@ -136,9 +146,31 @@ export function getInstallationId(value: string): number | null {
   return parsePositiveSafeInteger(value);
 }
 
+export function integrationRecoveryGuidance(code: IntegrationErrorCode): string {
+  switch (code) {
+    case "INSTALLATION_NOT_CONFIRMED":
+      return "GitHub is still confirming this installation. Try again shortly.";
+    case "INSTALLATION_DISCONNECTED":
+      return "Reinstall or reconnect the Limen GitHub App.";
+    case "SETUP_FILES_CONFLICT":
+      return "Inspect the existing Limen workflow and policy files before creating setup.";
+    case "SETUP_PR_FAILED":
+      return "Retry setup PR creation after checking repository permissions.";
+    case "OIDC_REJECTED":
+      return "Inspect the Limen workflow and GitHub OIDC configuration.";
+    case "CALLBACK_REPOSITORY_MISMATCH":
+      return "Inspect the repository installation and workflow configuration.";
+    case "CONFIGURATION_INVALID":
+      return "Review the Limen workflow, repository Secret, Variable, and setup policy.";
+  }
+}
+
 export function limenApiErrorMessage(error: unknown): string {
   if (!(error instanceof LimenApiError)) {
     return "Limen is temporarily unavailable. Try again.";
+  }
+  if (error.integrationCode !== undefined) {
+    return integrationRecoveryGuidance(error.integrationCode);
   }
   if (error.status === 401) {
     return "Your Limen session has expired. Sign in again.";
@@ -149,19 +181,14 @@ export function limenApiErrorMessage(error: unknown): string {
   if (error.status === 404) {
     return "This GitHub repository is not available.";
   }
-  if (error.status === 409 && error.code === "INSTALLATION_NOT_CONFIRMED") {
-    return "GitHub is still confirming this installation. Try again shortly.";
-  }
-  if (error.status === 409 && error.code === "ALREADY_CONFIGURED_FILES_PRESENT") {
-    return "Some Limen setup files already exist. Review the existing configuration before creating a PR.";
-  }
-  if (error.status === 409 && error.code === "INSTALLATION_DISCONNECTED") {
-    return "This GitHub installation is disconnected. Reinstall or reconnect Limen to continue.";
-  }
   if (error.status >= 500) {
     return "Limen is temporarily unavailable. Try again.";
   }
   return "Limen could not complete that request.";
+}
+
+export function isIntegrationErrorCode(value: string): value is IntegrationErrorCode {
+  return INTEGRATION_ERROR_CODE_SET.has(value);
 }
 
 function objectValue(value: unknown): Record<string, unknown> | null {

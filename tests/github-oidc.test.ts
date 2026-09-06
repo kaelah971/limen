@@ -126,6 +126,8 @@ const EVALUATION_REPOSITORY = {
   fullName: "kaelah971/limen-demo",
   installationConnectionState: "ACTIVE" as const,
   lifecycleState: "CONFIGURED" as const,
+  latestDecision: "PASS" as const,
+  latestEvaluationAt: "2026-09-05T00:00:00.000Z",
 };
 
 type FakeEvaluationRepository = {
@@ -139,6 +141,8 @@ type FakeEvaluationRepository = {
     | "VERIFIED"
     | "NEEDS_ATTENTION"
     | "DISCONNECTED";
+  latestDecision: "PASS" | "HOLD" | "REVIEW" | null;
+  latestEvaluationAt: string | null;
 };
 
 function verifierFor(claims: Record<string, unknown> = OIDC_CLAIMS) {
@@ -171,6 +175,11 @@ class FakeEvaluationStore {
     }
     const evaluation = { id: "evaluation-1", ...input };
     this.evaluations.push(evaluation);
+    if (this.repository !== null) {
+      this.repository.lifecycleState = "VERIFIED";
+      this.repository.latestDecision = input.decision as "PASS" | "HOLD" | "REVIEW";
+      this.repository.latestEvaluationAt = input.evaluatedAt as string;
+    }
     return evaluation;
   }
 
@@ -378,7 +387,24 @@ describe("GitHub Actions evaluation endpoint", () => {
     expect(response.status).toBe(200);
     expect(body).toMatchObject({ accepted: true });
     expect(store.recordedInputs).toEqual([EVALUATION_BODY]);
+    expect(store.repository).toMatchObject({
+      lifecycleState: "VERIFIED",
+      latestDecision: "REVIEW",
+      latestEvaluationAt: EVALUATION_BODY.evaluatedAt,
+    });
+    expect(store.repository?.lifecycleState).not.toBe("NEEDS_ATTENTION");
     expect(JSON.stringify(body)).not.toContain(OIDC_TOKEN);
+  });
+
+  it("keeps CONFIGURED when no evaluation callback arrives", () => {
+    const store = new FakeEvaluationStore();
+
+    expect(store.repository).toMatchObject({
+      lifecycleState: "CONFIGURED",
+      latestDecision: "PASS",
+      latestEvaluationAt: EVALUATION_REPOSITORY.latestEvaluationAt,
+    });
+    expect(store.evaluations).toHaveLength(0);
   });
 
   it.each([
@@ -389,8 +415,10 @@ describe("GitHub Actions evaluation endpoint", () => {
     const url = await startEvaluationServer(store);
 
     const response = await postEvaluation(url, EVALUATION_BODY, token);
+    const body = await response.json() as { code?: string };
 
     expect(response.status).toBe(401);
+    expect(body.code).toBe("OIDC_REJECTED");
     expect(store.recordedInputs).toHaveLength(0);
   });
 
@@ -404,8 +432,10 @@ describe("GitHub Actions evaluation endpoint", () => {
     const url = await startEvaluationServer(store);
 
     const response = await postEvaluation(url, { ...EVALUATION_BODY, ...override });
+    const body = await response.json() as { code?: string };
 
     expect(response.status).toBe(403);
+    expect(body.code).toBe("CALLBACK_REPOSITORY_MISMATCH");
     expect(store.recordedInputs).toHaveLength(0);
   });
 
@@ -418,8 +448,10 @@ describe("GitHub Actions evaluation endpoint", () => {
     const url = await startEvaluationServer(store);
 
     const response = await postEvaluation(url);
+    const body = await response.json() as { code?: string };
 
     expect(response.status).toBe(403);
+    expect(body.code).toBe("CALLBACK_REPOSITORY_MISMATCH");
     expect(store.recordedInputs).toHaveLength(0);
   });
 
@@ -428,11 +460,11 @@ describe("GitHub Actions evaluation endpoint", () => {
     ["disconnected installation", {
       ...EVALUATION_REPOSITORY,
       installationConnectionState: "DISCONNECTED" as const,
-    }, 409, "GITHUB_INSTALLATION_DISCONNECTED"],
+    }, 409, "INSTALLATION_DISCONNECTED"],
     ["disconnected repository", {
       ...EVALUATION_REPOSITORY,
       lifecycleState: "DISCONNECTED" as const,
-    }, 409, "GITHUB_REPOSITORY_DISCONNECTED"],
+    }, 409, "INSTALLATION_DISCONNECTED"],
     ["setup required repository", {
       ...EVALUATION_REPOSITORY,
       lifecycleState: "SETUP_REQUIRED" as const,
@@ -441,7 +473,7 @@ describe("GitHub Actions evaluation endpoint", () => {
       ...EVALUATION_REPOSITORY,
       lifecycleState: "SETUP_PR_OPEN" as const,
     }, 409, "GITHUB_REPOSITORY_NOT_READY"],
-  ] as const)("rejects %s", async (_label, repository, status, code) => {
+  ] as const)("rejects %s", async (label, repository, status, code) => {
     const store = new FakeEvaluationStore();
     store.repository = repository;
     const url = await startEvaluationServer(store);
@@ -452,6 +484,15 @@ describe("GitHub Actions evaluation endpoint", () => {
     expect(response.status).toBe(status);
     if (code !== undefined) {
       expect(body.code).toBe(code);
+    }
+    if (code === "INSTALLATION_DISCONNECTED") {
+      expect(store.repository).toMatchObject({
+        latestDecision: "PASS",
+        latestEvaluationAt: EVALUATION_REPOSITORY.latestEvaluationAt,
+      });
+      if (label === "disconnected repository") {
+        expect(store.repository?.lifecycleState).toBe("DISCONNECTED");
+      }
     }
     expect(store.recordedInputs).toHaveLength(0);
   });
@@ -531,6 +572,10 @@ describe("GitHub Actions integration health endpoint", () => {
     expect(body).toMatchObject({ accepted: true, repositoryId: REPOSITORY_ID, lifecycleState: "NEEDS_ATTENTION" });
     expect(store.healthInputs).toEqual([{ repositoryId: REPOSITORY_ID, observedAt: HEALTH_BODY.observedAt }]);
     expect(store.recordedInputs).toHaveLength(0);
+    expect(store.repository).toMatchObject({
+      latestDecision: "PASS",
+      latestEvaluationAt: EVALUATION_REPOSITORY.latestEvaluationAt,
+    });
     expect(JSON.stringify(body)).not.toMatch(/PASS|HOLD|REVIEW/);
   });
 
@@ -556,8 +601,10 @@ describe("GitHub Actions integration health endpoint", () => {
     const url = await startHealthServer(store);
 
     const response = await postHealth(url, HEALTH_BODY, token);
+    const body = await response.json() as { code?: string };
 
     expect(response.status).toBe(status);
+    expect(body.code).toBe("OIDC_REJECTED");
     expect(store.healthInputs).toHaveLength(0);
   });
 
@@ -571,8 +618,10 @@ describe("GitHub Actions integration health endpoint", () => {
     const url = await startHealthServer(store);
 
     const response = await postHealth(url, { ...HEALTH_BODY, ...override });
+    const body = await response.json() as { code?: string };
 
     expect(response.status).toBe(403);
+    expect(body.code).toBe("CALLBACK_REPOSITORY_MISMATCH");
     expect(store.healthInputs).toHaveLength(0);
   });
 
@@ -582,15 +631,17 @@ describe("GitHub Actions integration health endpoint", () => {
     const url = await startHealthServer(store);
 
     const response = await postHealth(url);
+    const body = await response.json() as { code?: string };
 
     expect(response.status).toBe(403);
+    expect(body.code).toBe("CALLBACK_REPOSITORY_MISMATCH");
     expect(store.healthInputs).toHaveLength(0);
   });
 
   it.each([
     ["unknown repository", null, 404, undefined],
-    ["disconnected installation", { ...EVALUATION_REPOSITORY, installationConnectionState: "DISCONNECTED" as const }, 409, "GITHUB_INSTALLATION_DISCONNECTED"],
-    ["disconnected repository", { ...EVALUATION_REPOSITORY, lifecycleState: "DISCONNECTED" as const }, 409, "GITHUB_REPOSITORY_DISCONNECTED"],
+    ["disconnected installation", { ...EVALUATION_REPOSITORY, installationConnectionState: "DISCONNECTED" as const }, 409, "INSTALLATION_DISCONNECTED"],
+    ["disconnected repository", { ...EVALUATION_REPOSITORY, lifecycleState: "DISCONNECTED" as const }, 409, "INSTALLATION_DISCONNECTED"],
     ["setup required repository", { ...EVALUATION_REPOSITORY, lifecycleState: "SETUP_REQUIRED" as const }, 409, "GITHUB_REPOSITORY_NOT_READY"],
     ["setup PR open repository", { ...EVALUATION_REPOSITORY, lifecycleState: "SETUP_PR_OPEN" as const }, 409, "GITHUB_REPOSITORY_NOT_READY"],
   ] as const)("rejects %s", async (_label, repository, status, code) => {

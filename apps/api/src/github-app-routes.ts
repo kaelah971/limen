@@ -546,31 +546,46 @@ function repositoryErrorResponse(error: unknown): GitHubRepositoryHttpResponse {
       return response(404, { code: error.code, message: error.message });
     }
     if (error.code === "GITHUB_REPOSITORY_DISCONNECTED") {
-      return response(409, { code: error.code, message: error.message });
+      return response(409, {
+        code: "INSTALLATION_DISCONNECTED",
+        message: "The GitHub installation is disconnected.",
+      });
     }
     if (error.code === "GITHUB_SETUP_PR_ALREADY_OPEN") {
       return response(409, { code: error.code, message: error.message });
     }
     if (error.code === "GITHUB_SETUP_INPUT_INVALID") {
-      return response(400, { code: error.code, message: error.message });
+      return response(400, {
+        code: "CONFIGURATION_INVALID",
+        message: "The repository setup configuration is invalid.",
+      });
     }
     return response(500, {
-      code: error.code,
+      code: "SETUP_PR_FAILED",
       message: "The setup pull request could not be recorded.",
     });
   }
   if (error instanceof SetupInspectionError) {
-    return response(502, { code: error.code, message: error.message });
+    return response(502, {
+      code: "SETUP_PR_FAILED",
+      message: "The repository setup could not be inspected.",
+    });
   }
   if (error instanceof SetupGitHubError) {
-    return response(502, { code: error.code, message: error.message });
+    return response(502, {
+      code: "SETUP_PR_FAILED",
+      message: "The setup pull request could not be created on GitHub.",
+    });
   }
   if (error instanceof SetupPersistenceError) {
-    return response(500, { code: error.code, message: error.message });
+    return response(500, {
+      code: "SETUP_PR_FAILED",
+      message: "The setup pull request could not be recorded.",
+    });
   }
   if (error instanceof SetupConfigError) {
     return response(500, {
-      code: error.code,
+      code: "CONFIGURATION_INVALID",
       message: "The setup generation configuration is invalid.",
     });
   }
@@ -582,20 +597,20 @@ function repositoryErrorResponse(error: unknown): GitHubRepositoryHttpResponse {
       });
     }
     return response(502, {
-      code: "SETUP_GITHUB_ERROR",
+      code: "SETUP_PR_FAILED",
       message: "The setup pull request could not be created on GitHub.",
     });
   }
   if (error instanceof SetupError) {
     return response(502, {
-      code: error.code,
+      code: "SETUP_PR_FAILED",
       message: "The GitHub repository setup request failed.",
     });
   }
   if (error instanceof GitHubAppStoreError) {
     return response(500, {
-      code: error.code,
-      message: "The GitHub repository metadata store is unavailable.",
+      code: "SETUP_PR_FAILED",
+      message: "The GitHub repository setup request could not be completed.",
     });
   }
   return response(500, {
@@ -889,11 +904,17 @@ function repositoryMatchesIdentity(
 
 function evaluationErrorResponse(error: unknown): GitHubEvaluationHttpResponse {
   if (error instanceof GitHubEvaluationRequestError) {
+    if (error.code === "GITHUB_OIDC_UNAUTHORIZED") {
+      return response(401, {
+        code: "OIDC_REJECTED",
+        message: "The GitHub Actions OIDC token is invalid.",
+      });
+    }
     return response(error.status, { code: error.code, message: error.message });
   }
   if (error instanceof GitHubActionsOidcError) {
     return response(401, {
-      code: error.code,
+      code: "OIDC_REJECTED",
       message: "The GitHub Actions OIDC token is invalid.",
     });
   }
@@ -905,7 +926,10 @@ function evaluationErrorResponse(error: unknown): GitHubEvaluationHttpResponse {
       error.code === "GITHUB_INSTALLATION_DISCONNECTED"
       || error.code === "GITHUB_REPOSITORY_DISCONNECTED"
     ) {
-      return response(409, { code: error.code, message: error.message });
+      return response(409, {
+        code: "INSTALLATION_DISCONNECTED",
+        message: "The GitHub installation is disconnected.",
+      });
     }
     if (error.code === "GITHUB_EVALUATION_CONFLICT") {
       return response(409, { code: error.code, message: error.message });
@@ -962,7 +986,7 @@ export async function handleGitHubEvaluation(
       || input.workflowRef !== identity.workflowRef
     ) {
       return response(403, {
-        code: "GITHUB_EVALUATION_CLAIM_MISMATCH",
+        code: "CALLBACK_REPOSITORY_MISMATCH",
         message: "The GitHub evaluation does not match the OIDC claims.",
       });
     }
@@ -976,19 +1000,19 @@ export async function handleGitHubEvaluation(
     }
     if (!repositoryMatchesIdentity(repository, identity)) {
       return response(403, {
-        code: "GITHUB_EVALUATION_REPOSITORY_MISMATCH",
+        code: "CALLBACK_REPOSITORY_MISMATCH",
         message: "The GitHub OIDC repository does not match the stored repository.",
       });
     }
     if (repository.installationConnectionState !== "ACTIVE") {
       return response(409, {
-        code: "GITHUB_INSTALLATION_DISCONNECTED",
+        code: "INSTALLATION_DISCONNECTED",
         message: "The GitHub installation is disconnected.",
       });
     }
     if (repository.lifecycleState === "DISCONNECTED") {
       return response(409, {
-        code: "GITHUB_REPOSITORY_DISCONNECTED",
+        code: "INSTALLATION_DISCONNECTED",
         message: "The GitHub repository is disconnected.",
       });
     }
@@ -1012,11 +1036,17 @@ export async function handleGitHubEvaluation(
 
 function integrationHealthErrorResponse(error: unknown): GitHubIntegrationHealthHttpResponse {
   if (error instanceof GitHubIntegrationHealthRequestError) {
+    if (error.code === "GITHUB_OIDC_UNAUTHORIZED") {
+      return response(401, {
+        code: "OIDC_REJECTED",
+        message: "The GitHub Actions OIDC token is invalid.",
+      });
+    }
     return response(error.status, { code: error.code, message: error.message });
   }
   if (error instanceof GitHubActionsOidcError) {
     return response(401, {
-      code: error.code,
+      code: "OIDC_REJECTED",
       message: "The GitHub Actions OIDC token is invalid.",
     });
   }
@@ -1029,6 +1059,13 @@ function integrationHealthErrorResponse(error: unknown): GitHubIntegrationHealth
       || error.code === "GITHUB_REPOSITORY_DISCONNECTED"
       || error.code === "GITHUB_REPOSITORY_NOT_READY"
     ) {
+      if (error.code === "GITHUB_INSTALLATION_DISCONNECTED"
+        || error.code === "GITHUB_REPOSITORY_DISCONNECTED") {
+        return response(409, {
+          code: "INSTALLATION_DISCONNECTED",
+          message: "The GitHub installation is disconnected.",
+        });
+      }
       return response(409, { code: error.code, message: error.message });
     }
     if (error.code === "GITHUB_INTEGRATION_HEALTH_INPUT_INVALID") {
@@ -1072,7 +1109,7 @@ export async function handleGitHubIntegrationHealth(
       || input.workflowRef !== identity.workflowRef
     ) {
       return response(403, {
-        code: "GITHUB_INTEGRATION_HEALTH_CLAIM_MISMATCH",
+        code: "CALLBACK_REPOSITORY_MISMATCH",
         message: "The GitHub integration health report does not match the OIDC claims.",
       });
     }
@@ -1086,19 +1123,19 @@ export async function handleGitHubIntegrationHealth(
     }
     if (!repositoryMatchesIdentity(repository, identity)) {
       return response(403, {
-        code: "GITHUB_INTEGRATION_HEALTH_REPOSITORY_MISMATCH",
+        code: "CALLBACK_REPOSITORY_MISMATCH",
         message: "The GitHub OIDC repository does not match the stored repository.",
       });
     }
     if (repository.installationConnectionState !== "ACTIVE") {
       return response(409, {
-        code: "GITHUB_INSTALLATION_DISCONNECTED",
+        code: "INSTALLATION_DISCONNECTED",
         message: "The GitHub installation is disconnected.",
       });
     }
     if (repository.lifecycleState === "DISCONNECTED") {
       return response(409, {
-        code: "GITHUB_REPOSITORY_DISCONNECTED",
+        code: "INSTALLATION_DISCONNECTED",
         message: "The GitHub repository is disconnected.",
       });
     }
@@ -1199,7 +1236,8 @@ export async function handleGitHubRepositoryRequest(
       if (result.code === "ALREADY_CONFIGURED_FILES_PRESENT") {
         return response(409, {
           repositoryId: repository.repositoryId,
-          ...result,
+          code: "SETUP_FILES_CONFLICT",
+          inspection: result.inspection,
         });
       }
       return response(200, {

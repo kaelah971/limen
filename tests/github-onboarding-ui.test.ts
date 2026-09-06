@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createLimenApi,
   getInstallationId,
+  integrationRecoveryGuidance,
   LimenApiError,
+  type IntegrationErrorCode,
   normalizeLimenApiBaseUrl,
 } from "../app/lib/limen-api";
 import {
@@ -138,6 +140,42 @@ describe("Limen API client", () => {
     expect(error).toMatchObject({ status: 500 });
   });
 
+  it.each([
+    ["INSTALLATION_NOT_CONFIRMED", 409],
+    ["INSTALLATION_DISCONNECTED", 409],
+    ["SETUP_FILES_CONFLICT", 409],
+    ["SETUP_PR_FAILED", 500],
+    ["OIDC_REJECTED", 401],
+    ["CALLBACK_REPOSITORY_MISMATCH", 403],
+    ["CONFIGURATION_INVALID", 409],
+  ] as const)("preserves the stable integration code %s without raw backend details", async (code, status) => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse(status, {
+        code,
+        message: "private-key-that-must-not-escape",
+      }),
+    );
+    const api = createLimenApi("https://api.example.test", fetcher);
+
+    const error = await api.listRepositories(ACCESS_TOKEN).catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(LimenApiError);
+    expect(error).toMatchObject({ status, code, integrationCode: code });
+    expect(String(error)).not.toContain("private-key-that-must-not-escape");
+  });
+
+  it.each([
+    ["INSTALLATION_NOT_CONFIRMED", "GitHub is still confirming this installation. Try again shortly."],
+    ["INSTALLATION_DISCONNECTED", "Reinstall or reconnect the Limen GitHub App."],
+    ["SETUP_FILES_CONFLICT", "Inspect the existing Limen workflow and policy files before creating setup."],
+    ["SETUP_PR_FAILED", "Retry setup PR creation after checking repository permissions."],
+    ["OIDC_REJECTED", "Inspect the Limen workflow and GitHub OIDC configuration."],
+    ["CALLBACK_REPOSITORY_MISMATCH", "Inspect the repository installation and workflow configuration."],
+    ["CONFIGURATION_INVALID", "Review the Limen workflow, repository Secret, Variable, and setup policy."],
+  ] as const)("maps %s to safe recovery guidance", (code, message) => {
+    expect(integrationRecoveryGuidance(code as IntegrationErrorCode)).toBe(message);
+  });
+
   it("uses GET for read endpoints and POST for setup PR creation", async () => {
     const preview = {
       repositoryId: 301,
@@ -221,6 +259,11 @@ describe("GitHub onboarding UI contracts", () => {
     expect(detailClient).toContain("Create setup PR");
     expect(detailClient).toContain("LIMEN_TELEGRAPH_PRIVATE_KEY");
     expect(detailClient).toContain("TELEGRAPH_ENGINE_URL");
+    expect(detailClient).toContain("Limen's repository integration needs attention before it can reliably report future evaluations.");
+    expect(detailClient).toContain("Review the repository setup and GitHub configuration.");
+    expect(detailClient).toContain("Setup is merged. Limen is waiting for the first accepted real evaluation before this repository becomes Verified.");
+    expect(detailClient).toContain("Verified after at least one accepted OIDC-authenticated evaluation.");
+    expect(detailClient).toContain("Needs evidence review");
     expect(source).not.toContain("localStorage");
     expect(source).not.toMatch(/SUPABASE_SERVICE_ROLE_KEY|GITHUB_APP_PRIVATE_KEY|GITHUB_WEBHOOK_SECRET|TELEGRAPH_PRIVATE_KEY\s*=/);
     expect(repositoryStatus).not.toContain('"REVIEW"');

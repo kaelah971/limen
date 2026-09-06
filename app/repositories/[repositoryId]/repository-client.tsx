@@ -38,6 +38,44 @@ function decisionHeading(decision: LimenRepository["latestDecision"]): string {
   }
 }
 
+function integrationStatusCopy(state: LimenRepository["lifecycleState"]): {
+  summary: string;
+  guidance: string;
+} {
+  switch (state) {
+    case "CONFIGURED":
+      return {
+        summary: "Setup is merged. Limen is waiting for the first accepted real evaluation before this repository becomes Verified.",
+        guidance: "Run a real Limen evaluation to verify the repository.",
+      };
+    case "VERIFIED":
+      return {
+        summary: "Verified after at least one accepted OIDC-authenticated evaluation.",
+        guidance: "View the latest decision and continue under the recorded integration.",
+      };
+    case "NEEDS_ATTENTION":
+      return {
+        summary: "Limen's repository integration needs attention before it can reliably report future evaluations.",
+        guidance: "Review the repository setup and GitHub configuration.",
+      };
+    case "DISCONNECTED":
+      return {
+        summary: "The GitHub integration is disconnected.",
+        guidance: "Reinstall or reconnect the Limen GitHub App.",
+      };
+    case "SETUP_PR_OPEN":
+      return {
+        summary: "A setup PR is open and has not been merged yet.",
+        guidance: "Review and merge the open setup PR before running a real evaluation.",
+      };
+    case "SETUP_REQUIRED":
+      return {
+        summary: "Limen setup has not been merged for this repository.",
+        guidance: "Review the proposed setup before creating a PR.",
+      };
+  }
+}
+
 function isSetupState(repository: LimenRepository): boolean {
   return repository.lifecycleState === "SETUP_REQUIRED"
     || repository.lifecycleState === "SETUP_PR_OPEN"
@@ -212,6 +250,7 @@ export function RepositoryClient({ apiBaseUrl, repositoryId }: RepositoryClientP
     && preview.filesToCreate.length > 0
     && (repository.lifecycleState === "SETUP_REQUIRED" || repository.lifecycleState === "NEEDS_ATTENTION")
     && repository.setupPullRequest === null;
+  const integrationStatus = integrationStatusCopy(repository.lifecycleState);
 
   return (
     <>
@@ -231,11 +270,16 @@ export function RepositoryClient({ apiBaseUrl, repositoryId }: RepositoryClientP
             {repository.latestDecision === null ? <span className="context-tag">No release decision yet</span> : <DecisionBadge decision={repository.latestDecision} />}
             <h2 id="repository-decision-heading">{decisionHeading(repository.latestDecision)}</h2>
             <p className="decision-summary">Integration state and release decision are separate. The repository becomes verified only after an accepted real evaluation.</p>
-            <div className="decision-meta">
-              <div className="decision-meta-row"><span>Integration state</span><span>{repository.lifecycleState}</span></div>
-              <div className="decision-meta-row"><span>Last evaluation</span><span>{formatTimestamp(repository.latestEvaluationAt)}</span></div>
-            </div>
-          </div>
+             <div className="decision-meta">
+               <div className="decision-meta-row"><span>Integration state</span><span>{repository.lifecycleState}</span></div>
+               <div className="decision-meta-row"><span>Last evaluation</span><span>{formatTimestamp(repository.latestEvaluationAt)}</span></div>
+             </div>
+             <div className={`setup-note${repository.lifecycleState === "NEEDS_ATTENTION" ? " setup-note-warning" : ""}`} role={repository.lifecycleState === "NEEDS_ATTENTION" ? "alert" : undefined}>
+               <strong>Integration health</strong>
+               <span>{integrationStatus.summary}</span>
+               <span>{integrationStatus.guidance}</span>
+             </div>
+           </div>
           <div className="setup-note">
             <strong>Next action</strong>
             <span>{repository.lifecycleState === "SETUP_REQUIRED" ? "Review the proposed setup before creating a PR." : repository.lifecycleState === "SETUP_PR_OPEN" ? "Review and merge the open setup PR, then run a real evaluation." : repository.lifecycleState === "CONFIGURED" ? "Run a real Limen evaluation to verify the repository." : repository.lifecycleState === "VERIFIED" ? "View the latest decision and continue under the recorded integration." : repository.lifecycleState === "NEEDS_ATTENTION" ? "Review the integration setup and create a corrective setup PR if appropriate." : "Reconnect Limen before taking repository actions."}</span>

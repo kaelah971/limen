@@ -1199,7 +1199,7 @@ describe("authenticated repository APIs", () => {
     expect(transport.createdFiles.map((file) => file.path)).toEqual(["limen.yml"]);
   });
 
-  it("returns ALREADY_CONFIGURED_FILES_PRESENT without setup writes", async () => {
+  it("returns SETUP_FILES_CONFLICT without setup writes", async () => {
     const store = new FakeRepositoryStore();
     addRepositoryFixtures(store);
     store.repositories.get(301)!.setupPullRequest = null;
@@ -1220,7 +1220,7 @@ describe("authenticated repository APIs", () => {
     const body = await response.json() as { code: string };
 
     expect(response.status).toBe(409);
-    expect(body.code).toBe("ALREADY_CONFIGURED_FILES_PRESENT");
+    expect(body.code).toBe("SETUP_FILES_CONFLICT");
     expect(transport.createdFiles).toHaveLength(0);
     expect(transport.pullRequests).toHaveLength(0);
     expect(store.recordedSetupPullRequests).toHaveLength(0);
@@ -1246,7 +1246,7 @@ describe("authenticated repository APIs", () => {
     const body = await response.json() as { code: string };
 
     expect(response.status).toBe(502);
-    expect(body.code).toBe("SETUP_INSPECTION_FAILED");
+    expect(body.code).toBe("SETUP_PR_FAILED");
     expect(store.repositories.get(301)?.lifecycleState).toBe("SETUP_REQUIRED");
   });
 
@@ -1292,7 +1292,7 @@ describe("authenticated repository APIs", () => {
     const body = JSON.stringify(await response.json());
 
     expect(response.status).toBe(500);
-    expect(body).toContain("SETUP_PERSISTENCE_FAILED");
+    expect(body).toContain("SETUP_PR_FAILED");
     expect(body).not.toContain("service-role-fixture");
     expect(store.repositories.get(301)?.lifecycleState).toBe("SETUP_REQUIRED");
   });
