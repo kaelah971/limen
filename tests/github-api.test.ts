@@ -937,7 +937,7 @@ describe("authenticated repository APIs", () => {
     const body = await response.json() as { repositories: RepositoryFixture[] };
 
     expect(response.status).toBe(200);
-    expect(body.repositories.map((repository) => repository.repositoryId)).toEqual([301, 304]);
+    expect(body.repositories.map((repository) => repository.repositoryId)).toEqual([301]);
     expect(body.repositories.find((repository) => repository.repositoryId === 301)).toMatchObject({
       owner: "kaelah971",
       name: "limen",
@@ -1071,6 +1071,7 @@ describe("authenticated repository APIs", () => {
   it("returns the existing open setup PR without new GitHub work", async () => {
     const store = new FakeRepositoryStore();
     addRepositoryFixtures(store);
+    store.repositories.get(301)!.setupPullRequest = null;
     const transport = new FakeRepositoryGitHubTransport();
     const setupService = makeRepositorySetupService(store, transport);
     const url = await startRepositoryServer(

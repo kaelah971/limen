@@ -1,4 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type {
+  LimenReleaseDecision,
+  RepositoryLifecycleState,
+} from "../../../packages/github-app/src";
+import type {
+  SetupPersistence,
+  SetupPullRequestRecord,
+} from "../../../packages/github-app/src";
 
 export interface GitHubRepositoryMetadata {
   repositoryId: number;
@@ -34,6 +42,30 @@ export interface GitHubInstallationRecord {
   installedByGithubUserId: number;
   boundByAuthUserId: string | null;
   connectionState: "ACTIVE" | "DISCONNECTED";
+}
+
+export interface GitHubRepositoryRecord {
+  repositoryId: number;
+  installationId: number;
+  ownerLogin: string;
+  repositoryName: string;
+  fullName: string;
+  defaultBranch: string;
+  lifecycleState: RepositoryLifecycleState;
+  latestDecision: LimenReleaseDecision | null;
+  latestEvaluationAt: string | null;
+  setupPullRequest: SetupPullRequestRecord | null;
+}
+
+export interface GitHubRepositoryStore extends GitHubInstallationAuthorizationStore, SetupPersistence {
+  listAuthorizedRepositories(authUserId: string): Promise<GitHubRepositoryRecord[]>;
+  getAuthorizedRepository(
+    repositoryId: number,
+    authUserId: string,
+  ): Promise<GitHubRepositoryRecord | null>;
+  getInstallationState(
+    installationId: number,
+  ): Promise<"ACTIVE" | "DISCONNECTED">;
 }
 
 export interface GitHubInstallationAuthorizationStore {
@@ -103,6 +135,23 @@ export class GitHubInstallationAlreadyBoundError extends Error {
   }
 }
 
+export type GitHubSetupPersistenceErrorCode =
+  | "GITHUB_REPOSITORY_NOT_FOUND"
+  | "GITHUB_REPOSITORY_DISCONNECTED"
+  | "GITHUB_SETUP_PR_ALREADY_OPEN"
+  | "GITHUB_SETUP_INPUT_INVALID"
+  | "GITHUB_SETUP_PERSISTENCE_ERROR";
+
+export class GitHubSetupPersistenceError extends Error {
+  readonly code: GitHubSetupPersistenceErrorCode;
+
+  constructor(code: GitHubSetupPersistenceErrorCode, message: string) {
+    super(message);
+    this.name = "GitHubSetupPersistenceError";
+    this.code = code;
+  }
+}
+
 function isUniqueViolation(error: unknown): boolean {
   return error !== null
     && typeof error === "object"
@@ -115,6 +164,153 @@ function throwStoreError(error: unknown): never {
     throw error;
   }
   throw new GitHubAppStoreError();
+}
+
+function objectRow(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function numericValue(value: unknown): number | null {
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) ? value : null;
+  }
+  if (typeof value === "string" && /^\d+$/.test(value.trim())) {
+    const parsed = Number(value.trim());
+    return Number.isSafeInteger(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function requiredRowText(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const text = value.trim();
+  return text === "" ? null : text;
+}
+
+function repositoryLifecycleState(value: unknown): RepositoryLifecycleState | null {
+  return value === "SETUP_REQUIRED"
+    || value === "SETUP_PR_OPEN"
+    || value === "CONFIGURED"
+    || value === "VERIFIED"
+    || value === "NEEDS_ATTENTION"
+    || value === "DISCONNECTED"
+    ? value
+    : null;
+}
+
+function releaseDecision(value: unknown): LimenReleaseDecision | null {
+  return value === null || value === undefined
+    ? null
+    : value === "PASS" || value === "HOLD" || value === "REVIEW"
+      ? value
+      : null;
+}
+
+function setupPullRequestRow(
+  value: unknown,
+  repositoryId: number,
+): SetupPullRequestRecord {
+  const row = objectRow(value);
+  const prNumber = numericValue(row.pr_number);
+  const prUrl = requiredRowText(row.pr_url);
+  const branchName = requiredRowText(row.branch_name);
+  if (
+    numericValue(row.repository_id) !== repositoryId
+    || prNumber === null
+    || prNumber <= 0
+    || prUrl === null
+    || branchName === null
+    || row.state !== "OPEN"
+  ) {
+    throw new GitHubAppStoreError();
+  }
+  return {
+    repositoryId,
+    prNumber,
+    prUrl,
+    branchName,
+    state: "OPEN",
+  };
+}
+
+function repositoryRecord(value: unknown): GitHubRepositoryRecord {
+  const row = objectRow(value);
+  const repositoryId = numericValue(row.repository_id);
+  const installationId = numericValue(row.installation_id);
+  const ownerLogin = requiredRowText(row.owner_login);
+  const repositoryName = requiredRowText(row.repository_name);
+  const fullName = requiredRowText(row.full_name);
+  const defaultBranch = requiredRowText(row.default_branch);
+  const lifecycleState = repositoryLifecycleState(row.lifecycle_state);
+  const latestDecision = releaseDecision(row.latest_decision);
+  const latestEvaluationAt = row.latest_evaluation_at === null || row.latest_evaluation_at === undefined
+    ? null
+    : requiredRowText(row.latest_evaluation_at);
+  if (
+    repositoryId === null
+    || repositoryId <= 0
+    || installationId === null
+    || installationId <= 0
+    || ownerLogin === null
+    || repositoryName === null
+    || fullName === null
+    || defaultBranch === null
+    || lifecycleState === null
+    || (row.latest_decision !== null && row.latest_decision !== undefined && latestDecision === null)
+    || (row.latest_evaluation_at !== null && row.latest_evaluation_at !== undefined && latestEvaluationAt === null)
+  ) {
+    throw new GitHubAppStoreError();
+  }
+  return {
+    repositoryId,
+    installationId,
+    ownerLogin,
+    repositoryName,
+    fullName,
+    defaultBranch,
+    lifecycleState,
+    latestDecision,
+    latestEvaluationAt,
+    setupPullRequest: null,
+  };
+}
+
+function mapSetupPersistenceError(error: unknown): GitHubSetupPersistenceError {
+  const row = objectRow(error);
+  const code = typeof row.code === "string" ? row.code : "";
+  const message = typeof row.message === "string" ? row.message : "";
+  if (message === "GITHUB_REPOSITORY_NOT_FOUND" || code === "P0002") {
+    return new GitHubSetupPersistenceError(
+      "GITHUB_REPOSITORY_NOT_FOUND",
+      "The GitHub repository was not found.",
+    );
+  }
+  if (message === "GITHUB_REPOSITORY_DISCONNECTED" || code === "P0003") {
+    return new GitHubSetupPersistenceError(
+      "GITHUB_REPOSITORY_DISCONNECTED",
+      "The GitHub repository is disconnected.",
+    );
+  }
+  if (message === "GITHUB_SETUP_PR_ALREADY_OPEN" || code === "P0004") {
+    return new GitHubSetupPersistenceError(
+      "GITHUB_SETUP_PR_ALREADY_OPEN",
+      "The repository already has an open setup pull request.",
+    );
+  }
+  if (message === "GITHUB_SETUP_INPUT_INVALID" || code === "22023") {
+    return new GitHubSetupPersistenceError(
+      "GITHUB_SETUP_INPUT_INVALID",
+      "The setup pull request input is invalid.",
+    );
+  }
+  return new GitHubSetupPersistenceError(
+    "GITHUB_SETUP_PERSISTENCE_ERROR",
+    "The setup pull request could not be recorded.",
+  );
 }
 
 function repositoryRow(
@@ -213,6 +409,177 @@ export class SupabaseGitHubAppStore implements GitHubAppStore, GitHubInstallatio
       return "ALREADY_BOUND";
     }
     throw new GitHubInstallationAlreadyBoundError();
+  }
+
+  private async openSetupPullRequests(
+    repositoryIds: readonly number[],
+  ): Promise<Map<number, SetupPullRequestRecord>> {
+    if (repositoryIds.length === 0) {
+      return new Map();
+    }
+
+    const { data, error } = await this.client
+      .from("github_setup_prs")
+      .select("repository_id, pr_number, pr_url, branch_name, state")
+      .in("repository_id", repositoryIds)
+      .eq("state", "OPEN");
+    if (error !== null) {
+      throwStoreError(error);
+    }
+    if (!Array.isArray(data)) {
+      throw new GitHubAppStoreError();
+    }
+
+    const result = new Map<number, SetupPullRequestRecord>();
+    for (const row of data) {
+      const repositoryId = numericValue(objectRow(row).repository_id);
+      if (repositoryId === null || result.has(repositoryId)) {
+        throw new GitHubAppStoreError();
+      }
+      result.set(repositoryId, setupPullRequestRow(row, repositoryId));
+    }
+    return result;
+  }
+
+  async listAuthorizedRepositories(authUserId: string): Promise<GitHubRepositoryRecord[]> {
+    const { data, error } = await this.client
+      .from("github_repositories")
+      .select(
+        "repository_id, installation_id, owner_login, repository_name, full_name, default_branch, lifecycle_state, latest_decision, latest_evaluation_at, github_installations!inner(installation_id)",
+      )
+      .eq("github_installations.bound_by_auth_user_id", authUserId)
+      .eq("github_installations.connection_state", "ACTIVE")
+      .neq("lifecycle_state", "DISCONNECTED")
+      .order("repository_id", { ascending: true });
+    if (error !== null) {
+      throwStoreError(error);
+    }
+    if (!Array.isArray(data)) {
+      throw new GitHubAppStoreError();
+    }
+
+    const repositories = data.map(repositoryRecord);
+    const setupPullRequests = await this.openSetupPullRequests(
+      repositories.map((repository) => repository.repositoryId),
+    );
+    return repositories.map((repository) => ({
+      ...repository,
+      setupPullRequest: setupPullRequests.get(repository.repositoryId) ?? null,
+    }));
+  }
+
+  async getAuthorizedRepository(
+    repositoryId: number,
+    authUserId: string,
+  ): Promise<GitHubRepositoryRecord | null> {
+    const { data, error } = await this.client
+      .from("github_repositories")
+      .select(
+        "repository_id, installation_id, owner_login, repository_name, full_name, default_branch, lifecycle_state, latest_decision, latest_evaluation_at, github_installations!inner(installation_id)",
+      )
+      .eq("repository_id", repositoryId)
+      .eq("github_installations.bound_by_auth_user_id", authUserId)
+      .eq("github_installations.connection_state", "ACTIVE")
+      .neq("lifecycle_state", "DISCONNECTED")
+      .maybeSingle();
+    if (error !== null) {
+      throwStoreError(error);
+    }
+    if (data === null) {
+      return null;
+    }
+
+    const repository = repositoryRecord(data);
+    return {
+      ...repository,
+      setupPullRequest: await this.getOpenSetupPullRequest(repository.repositoryId),
+    };
+  }
+
+  async getInstallationState(
+    installationId: number,
+  ): Promise<"ACTIVE" | "DISCONNECTED"> {
+    const { data, error } = await this.client
+      .from("github_installations")
+      .select("connection_state")
+      .eq("installation_id", installationId)
+      .maybeSingle();
+    if (error !== null) {
+      throwStoreError(error);
+    }
+    if (data === null) {
+      throw new GitHubInstallationNotConfirmedError();
+    }
+    const state = objectRow(data).connection_state;
+    if (state !== "ACTIVE" && state !== "DISCONNECTED") {
+      throw new GitHubAppStoreError();
+    }
+    return state;
+  }
+
+  async getOpenSetupPullRequest(
+    repositoryId: number,
+  ): Promise<SetupPullRequestRecord | null> {
+    const { data, error } = await this.client
+      .from("github_setup_prs")
+      .select("repository_id, pr_number, pr_url, branch_name, state")
+      .eq("repository_id", repositoryId)
+      .eq("state", "OPEN")
+      .maybeSingle();
+    if (error !== null) {
+      throwStoreError(error);
+    }
+    return data === null ? null : setupPullRequestRow(data, repositoryId);
+  }
+
+  async recordSetupPullRequestAndTransition(input: {
+    repositoryId: number;
+    prNumber: number;
+    prUrl: string;
+    branchName: string;
+  }): Promise<SetupPullRequestRecord> {
+    const prUrl = input.prUrl.trim();
+    const branchName = input.branchName.trim();
+    if (
+      !Number.isSafeInteger(input.repositoryId)
+      || input.repositoryId <= 0
+      || !Number.isSafeInteger(input.prNumber)
+      || input.prNumber <= 0
+      || input.prNumber > 2_147_483_647
+      || prUrl === ""
+      || prUrl.length > 2048
+      || !prUrl.startsWith("https://")
+      || branchName === ""
+      || branchName.length > 255
+    ) {
+      throw new GitHubSetupPersistenceError(
+        "GITHUB_SETUP_INPUT_INVALID",
+        "The setup pull request input is invalid.",
+      );
+    }
+
+    let result: { data: unknown; error: unknown };
+    try {
+      result = await this.client.rpc("record_github_setup_pr_and_transition", {
+        p_repository_id: input.repositoryId,
+        p_pr_number: input.prNumber,
+        p_pr_url: prUrl,
+        p_branch_name: branchName,
+      });
+    } catch (error) {
+      throw mapSetupPersistenceError(error);
+    }
+    if (result.error !== null) {
+      throw mapSetupPersistenceError(result.error);
+    }
+    try {
+      return setupPullRequestRow(result.data, input.repositoryId);
+    } catch {
+      throw new GitHubSetupPersistenceError(
+        "GITHUB_SETUP_PERSISTENCE_ERROR",
+        "The setup pull request could not be recorded.",
+      );
+    }
   }
 
   async claimDelivery(

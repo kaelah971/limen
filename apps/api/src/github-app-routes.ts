@@ -1,5 +1,11 @@
 import type { IncomingMessage } from "node:http";
 import {
+  GitHubInstallationClientError,
+  SetupConfigError,
+  SetupError,
+  SetupGitHubError,
+  SetupInspectionError,
+  SetupPersistenceError,
   verifyGitHubWebhookSignature,
 } from "../../../packages/github-app/src";
 import {
@@ -7,14 +13,22 @@ import {
   GitHubInstallationAlreadyBoundError,
   GitHubInstallationDisconnectedError,
   GitHubInstallationNotConfirmedError,
+  GitHubRepositoryStore,
+  GitHubSetupPersistenceError,
 } from "./github-app-store";
 import type {
   GitHubAppStore,
   GitHubInstallationAuthorizationStore,
   GitHubRepositoryMetadata,
+  GitHubRepositoryRecord,
   InstallationCreatedInput,
   SetupPullRequestClosedInput,
 } from "./github-app-store";
+import type {
+  SetupGenerationConfig,
+  SetupRepository,
+  SetupService,
+} from "../../../packages/github-app/src";
 import {
   authenticateUser,
   UserAuthError,
@@ -44,6 +58,18 @@ export interface GitHubInstallationBindHttpResponse {
   body: Record<string, unknown>;
 }
 
+export interface GitHubRepositoryRouteOptions {
+  authClient: UserAuthClient;
+  store: GitHubRepositoryStore;
+  setupService: SetupService;
+  setupConfig: SetupGenerationConfig;
+}
+
+export interface GitHubRepositoryHttpResponse {
+  status: number;
+  body: Record<string, unknown>;
+}
+
 class GitHubWebhookRequestError extends Error {
   readonly status: number;
   readonly code: string;
@@ -56,11 +82,126 @@ class GitHubWebhookRequestError extends Error {
   }
 }
 
+class GitHubRepositoryRequestError extends Error {
+  readonly status: number;
+  readonly code: string;
+
+  constructor(status: number, code: string, message: string) {
+    super(message);
+    this.name = "GitHubRepositoryRequestError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
 function response(
   status: number,
   body: Record<string, unknown>,
 ): GitHubWebhookHttpResponse {
   return { status, body };
+}
+
+function repositoryIdValue(value: string): number {
+  if (!/^[1-9]\d*$/.test(value)) {
+    throw new GitHubRepositoryRequestError(
+      400,
+      "GITHUB_REPOSITORY_ID_INVALID",
+      "The GitHub repository ID is invalid.",
+    );
+  }
+  const repositoryId = Number(value);
+  if (!Number.isSafeInteger(repositoryId) || repositoryId <= 0) {
+    throw new GitHubRepositoryRequestError(
+      400,
+      "GITHUB_REPOSITORY_ID_INVALID",
+      "The GitHub repository ID is invalid.",
+    );
+  }
+  return repositoryId;
+}
+
+function repositoryNotFound(): GitHubRepositoryRequestError {
+  return new GitHubRepositoryRequestError(
+    404,
+    "GITHUB_REPOSITORY_NOT_FOUND",
+    "The GitHub repository was not found.",
+  );
+}
+
+function sanitizedRepository(repository: GitHubRepositoryRecord): Record<string, unknown> {
+  return {
+    repositoryId: repository.repositoryId,
+    owner: repository.ownerLogin,
+    name: repository.repositoryName,
+    fullName: repository.fullName,
+    defaultBranch: repository.defaultBranch,
+    lifecycleState: repository.lifecycleState,
+    latestDecision: repository.latestDecision,
+    latestEvaluationAt: repository.latestEvaluationAt,
+    setupPullRequest: sanitizedSetupPullRequest(repository.setupPullRequest),
+  };
+}
+
+function sanitizedSetupPullRequest(
+  setupPullRequest: GitHubRepositoryRecord["setupPullRequest"],
+): Record<string, unknown> | null {
+  return setupPullRequest === null
+    ? null
+    : {
+        number: setupPullRequest.prNumber,
+        url: setupPullRequest.prUrl,
+        state: setupPullRequest.state,
+      };
+}
+
+function setupRepository(repository: GitHubRepositoryRecord): SetupRepository {
+  return {
+    installationId: repository.installationId,
+    repositoryId: repository.repositoryId,
+    owner: repository.ownerLogin,
+    name: repository.repositoryName,
+    fullName: repository.fullName,
+    defaultBranch: repository.defaultBranch,
+  };
+}
+
+async function authorizedRepository(
+  repositoryIdValue_: string,
+  request: IncomingMessage,
+  options: GitHubRepositoryRouteOptions,
+): Promise<GitHubRepositoryRecord> {
+  const user = await authenticateUser(request, options.authClient, options.store);
+  const repositoryId = repositoryIdValue(repositoryIdValue_);
+  const repository = await options.store.getAuthorizedRepository(repositoryId, user.authUserId);
+  if (repository === null) {
+    throw repositoryNotFound();
+  }
+  return repository;
+}
+
+async function requireActionableRepository(
+  repositoryIdValue_: string,
+  request: IncomingMessage,
+  options: GitHubRepositoryRouteOptions,
+): Promise<GitHubRepositoryRecord> {
+  const repository = await authorizedRepository(repositoryIdValue_, request, options);
+  if (repository.lifecycleState === "DISCONNECTED") {
+    throw new GitHubInstallationDisconnectedError();
+  }
+  let state: "ACTIVE" | "DISCONNECTED";
+  try {
+    state = await options.store.getInstallationState(repository.installationId);
+  } catch (error) {
+    if (error instanceof GitHubInstallationNotConfirmedError
+      || error instanceof GitHubInstallationDisconnectedError) {
+      throw error;
+    }
+    throw new GitHubAppStoreError();
+  }
+  if (state !== "ACTIVE") {
+    throw new GitHubInstallationDisconnectedError();
+  }
+  return repository;
 }
 
 function headerValue(
@@ -328,6 +469,171 @@ export async function handleGitHubInstallationBind(
     });
   } catch (error) {
     return installationBindErrorResponse(error);
+  }
+}
+
+function repositoryErrorResponse(error: unknown): GitHubRepositoryHttpResponse {
+  if (error instanceof GitHubRepositoryRequestError || error instanceof UserAuthError) {
+    return response(error.status, { code: error.code, message: error.message });
+  }
+  if (error instanceof GitHubInstallationNotConfirmedError) {
+    return response(409, { code: error.code, message: error.message });
+  }
+  if (error instanceof GitHubInstallationDisconnectedError) {
+    return response(409, { code: error.code, message: error.message });
+  }
+  if (error instanceof GitHubSetupPersistenceError) {
+    if (error.code === "GITHUB_REPOSITORY_NOT_FOUND") {
+      return response(404, { code: error.code, message: error.message });
+    }
+    if (error.code === "GITHUB_REPOSITORY_DISCONNECTED") {
+      return response(409, { code: error.code, message: error.message });
+    }
+    if (error.code === "GITHUB_SETUP_PR_ALREADY_OPEN") {
+      return response(409, { code: error.code, message: error.message });
+    }
+    if (error.code === "GITHUB_SETUP_INPUT_INVALID") {
+      return response(400, { code: error.code, message: error.message });
+    }
+    return response(500, {
+      code: error.code,
+      message: "The setup pull request could not be recorded.",
+    });
+  }
+  if (error instanceof SetupInspectionError) {
+    return response(502, { code: error.code, message: error.message });
+  }
+  if (error instanceof SetupGitHubError) {
+    return response(502, { code: error.code, message: error.message });
+  }
+  if (error instanceof SetupPersistenceError) {
+    return response(500, { code: error.code, message: error.message });
+  }
+  if (error instanceof SetupConfigError) {
+    return response(500, {
+      code: error.code,
+      message: "The setup generation configuration is invalid.",
+    });
+  }
+  if (error instanceof GitHubInstallationClientError) {
+    if (error.code === "GITHUB_INSTALLATION_DISCONNECTED") {
+      return response(409, {
+        code: "INSTALLATION_DISCONNECTED",
+        message: "The GitHub installation is disconnected.",
+      });
+    }
+    return response(502, {
+      code: "SETUP_GITHUB_ERROR",
+      message: "The setup pull request could not be created on GitHub.",
+    });
+  }
+  if (error instanceof SetupError) {
+    return response(502, {
+      code: error.code,
+      message: "The GitHub repository setup request failed.",
+    });
+  }
+  if (error instanceof GitHubAppStoreError) {
+    return response(500, {
+      code: error.code,
+      message: "The GitHub repository metadata store is unavailable.",
+    });
+  }
+  return response(500, {
+    code: "GITHUB_REPOSITORY_API_INTERNAL_ERROR",
+    message: "The GitHub repository request failed.",
+  });
+}
+
+export async function handleGitHubRepositoryRequest(
+  request: IncomingMessage,
+  path: readonly string[],
+  options: GitHubRepositoryRouteOptions,
+): Promise<GitHubRepositoryHttpResponse> {
+  try {
+    const repositoryPath = path[3];
+    if (path.length === 3 && request.method === "GET") {
+      const user = await authenticateUser(request, options.authClient, options.store);
+      const repositories = await options.store.listAuthorizedRepositories(user.authUserId);
+      return response(200, {
+        repositories: repositories
+          .filter((repository) => repository.lifecycleState !== "DISCONNECTED")
+          .map(sanitizedRepository),
+      });
+    }
+
+    if (path.length !== 4 && path.length !== 5) {
+      throw new GitHubRepositoryRequestError(
+        404,
+        "GITHUB_REPOSITORY_ROUTE_NOT_FOUND",
+        "The GitHub repository route was not found.",
+      );
+    }
+    if (repositoryPath === undefined) {
+      throw repositoryNotFound();
+    }
+
+    if (path.length === 4 && request.method === "GET") {
+      const repository = await authorizedRepository(repositoryPath, request, options);
+      if (repository.lifecycleState === "DISCONNECTED") {
+        throw repositoryNotFound();
+      }
+      return response(200, sanitizedRepository(repository));
+    }
+
+    if (
+      path.length === 5
+      && (path[4] === "setup-preview" || path[4] === "setup-pr")
+      && (request.method === "GET" || request.method === "POST")
+    ) {
+      const repository = await requireActionableRepository(repositoryPath, request, options);
+      const setupRepositoryValue = setupRepository(repository);
+      if (path[4] === "setup-preview") {
+        if (request.method !== "GET") {
+          throw new GitHubRepositoryRequestError(
+            404,
+            "GITHUB_REPOSITORY_ROUTE_NOT_FOUND",
+            "The GitHub repository route was not found.",
+          );
+        }
+        const inspection = await options.setupService.inspectSetup(setupRepositoryValue);
+        return response(200, {
+          repositoryId: repository.repositoryId,
+          ...inspection,
+        });
+      }
+
+      if (request.method !== "POST") {
+        throw new GitHubRepositoryRequestError(
+          404,
+          "GITHUB_REPOSITORY_ROUTE_NOT_FOUND",
+          "The GitHub repository route was not found.",
+        );
+      }
+      const result = await options.setupService.createSetupPullRequest(
+        setupRepositoryValue,
+        options.setupConfig,
+      );
+      if (result.code === "ALREADY_CONFIGURED_FILES_PRESENT") {
+        return response(409, {
+          repositoryId: repository.repositoryId,
+          ...result,
+        });
+      }
+      return response(200, {
+        repositoryId: repository.repositoryId,
+        code: result.code,
+        setupPullRequest: sanitizedSetupPullRequest(result.setupPullRequest),
+      });
+    }
+
+    throw new GitHubRepositoryRequestError(
+      404,
+      "GITHUB_REPOSITORY_ROUTE_NOT_FOUND",
+      "The GitHub repository route was not found.",
+    );
+  } catch (error) {
+    return repositoryErrorResponse(error);
   }
 }
 

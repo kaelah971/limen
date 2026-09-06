@@ -34,8 +34,10 @@ import {
 } from "./receipt-repository";
 import {
   handleGitHubInstallationBind,
+  handleGitHubRepositoryRequest,
   handleGitHubWebhook,
   type GitHubInstallationBindRouteOptions,
+  type GitHubRepositoryRouteOptions,
   type GitHubWebhookRouteOptions,
 } from "./github-app-routes";
 
@@ -47,6 +49,7 @@ export interface LedgerServerOptions {
   receipts?: EvidenceReceiptStore;
   githubWebhook?: GitHubWebhookRouteOptions;
   githubInstallationBind?: GitHubInstallationBindRouteOptions;
+  githubRepositoryApi?: GitHubRepositoryRouteOptions;
   maxBodyBytes?: number;
   observability?: LimenObservabilityLogger;
   requestIdFactory?: () => string;
@@ -117,6 +120,20 @@ function routeTemplate(request: IncomingMessage): string {
       && path[4] === "bind"
     ) {
       return "/v1/github/installations/:installationId/bind";
+    }
+    if (path[1] === "github" && path[2] === "repositories") {
+      if (path.length === 3) {
+        return "/v1/github/repositories";
+      }
+      if (path.length === 4) {
+        return "/v1/github/repositories/:repositoryId";
+      }
+      if (path.length === 5 && path[4] === "setup-preview") {
+        return "/v1/github/repositories/:repositoryId/setup-preview";
+      }
+      if (path.length === 5 && path[4] === "setup-pr") {
+        return "/v1/github/repositories/:repositoryId/setup-pr";
+      }
     }
     return "unknown";
   } catch {
@@ -407,6 +424,39 @@ async function handleRequest(
         });
       } else {
         requestStage.success({ httpStatus: bindResponse.status });
+      }
+      return;
+    }
+    if (
+      path[0] === "v1"
+      && path[1] === "github"
+      && path[2] === "repositories"
+      && (
+        path.length === 3
+        || path.length === 4
+        || (path.length === 5 && (path[4] === "setup-preview" || path[4] === "setup-pr"))
+      )
+    ) {
+      if (options.githubRepositoryApi === undefined) {
+        throw new LedgerApiRequestError(
+          503,
+          "GITHUB_REPOSITORY_API_NOT_CONFIGURED",
+          "GitHub repository APIs are not configured.",
+        );
+      }
+      const repositoryResponse = await handleGitHubRepositoryRequest(
+        request,
+        path,
+        options.githubRepositoryApi,
+      );
+      sendJson(response, repositoryResponse.status, repositoryResponse.body);
+      if (repositoryResponse.status >= 400) {
+        requestStage.failure(undefined, {
+          httpStatus: repositoryResponse.status,
+          errorCode: String(repositoryResponse.body.code ?? "GITHUB_REPOSITORY_API_ERROR"),
+        });
+      } else {
+        requestStage.success({ httpStatus: repositoryResponse.status });
       }
       return;
     }
