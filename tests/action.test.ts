@@ -876,6 +876,7 @@ describe("P3 aggregation, UX, and build boundaries", () => {
       "max-lookups",
       "telegraph-engine-url",
       "expected-network",
+      "limen-api-url",
       "ledger-url",
       "ledger-token",
       "usage-class",

@@ -19,6 +19,7 @@ import { parsePullRequestContext } from "./context";
 import { readActionInputs } from "./inputs";
 import { loadBaseCommitPolicy } from "./policy";
 import { persistActionLedger } from "./persist";
+import { reportLimenEvaluation } from "./limen-callback";
 import { createLimenRunId, orchestrateLimenRun } from "./orchestrate";
 import { setActionOutputs } from "./outputs";
 import { renderSummary } from "./summary";
@@ -110,7 +111,7 @@ export async function runAction(): Promise<void> {
       "event-validation",
       correlation,
     );
-    let inputs: ActionInputs;
+    let inputs: ReturnType<typeof readActionInputs>;
     let actionContext: ReturnType<typeof parsePullRequestContext>;
     try {
       inputs = readActionInputs();
@@ -199,6 +200,24 @@ export async function runAction(): Promise<void> {
     } catch (error) {
       summaryStage.failure(error);
       throw error;
+    }
+    try {
+      const callback = await reportLimenEvaluation({
+        limenApiUrl: inputs.limenApiUrl,
+        repositoryId: process.env.GITHUB_REPOSITORY_ID,
+        githubRunId: outputResult.context.githubRunId,
+        githubRunAttempt: outputResult.context.githubRunAttempt,
+        workflowRef: process.env.GITHUB_WORKFLOW_REF,
+        commitSha: outputResult.headSha,
+        decision: outputResult.overallDecision,
+        receiptId: null,
+        evaluatedAt: outputResult.evaluatedAt,
+      });
+      if (callback.status === "failed") {
+        actionsCore.warning("Limen evaluation completed, but repository status reporting failed.");
+      }
+    } catch {
+      actionsCore.warning("Limen evaluation completed, but repository status reporting failed.");
     }
     applyActionOutcome(outputResult);
     const workflowFields = {

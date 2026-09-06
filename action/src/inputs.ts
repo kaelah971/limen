@@ -4,6 +4,8 @@ import { LedgerUsageClassSchema } from "../../packages/ledger/src";
 import type { LedgerUsageClass } from "../../packages/ledger/src";
 import type { ActionInputs } from "./types";
 
+export type ParsedActionInputs = ActionInputs & { limenApiUrl?: string };
+
 export interface ActionInputReader {
   getInput(
     name: string,
@@ -40,10 +42,40 @@ export function parseUsageClass(value: string): LedgerUsageClass {
   return parsed.data;
 }
 
+export function parseLimenApiUrl(value: string): string | undefined {
+  const normalized = value.trim();
+  if (normalized === "") {
+    return undefined;
+  }
+
+  let url: URL;
+  try {
+    url = new URL(normalized);
+  } catch {
+    throw new ConfigurationError("limen-api-url must be a valid HTTPS URL.", {
+      field: "limen-api-url",
+    });
+  }
+  if (
+    url.protocol !== "https:"
+    || url.username !== ""
+    || url.password !== ""
+    || url.search !== ""
+    || url.hash !== ""
+  ) {
+    throw new ConfigurationError("limen-api-url must be a valid HTTPS URL.", {
+      field: "limen-api-url",
+    });
+  }
+
+  const pathname = url.pathname.replace(/\/+$/, "");
+  return `${url.origin}${pathname}`;
+}
+
 export function readActionInputs(
   reader: ActionInputReader = actionsCore,
   environment: Record<string, string | undefined> = process.env,
-): ActionInputs {
+): ParsedActionInputs {
   const githubToken = reader.getInput("github-token", { required: true }).trim();
   if (githubToken === "") {
     throw new ConfigurationError("github-token is required.", {
@@ -61,6 +93,7 @@ export function readActionInputs(
 
   const inputEngineUrl = reader.getInput("telegraph-engine-url").trim();
   const inputNetwork = reader.getInput("expected-network").trim();
+  const inputLimenApiUrl = parseLimenApiUrl(reader.getInput("limen-api-url"));
   const inputLedgerUrl = reader.getInput("ledger-url").trim();
   const inputLedgerToken = reader.getInput("ledger-token").trim();
   const inputUsageClass = reader.getInput("usage-class").trim();
@@ -83,6 +116,7 @@ export function readActionInputs(
     ...(inputNetwork || environmentNetwork
       ? { expectedNetwork: inputNetwork || environmentNetwork }
       : {}),
+    ...(inputLimenApiUrl === undefined ? {} : { limenApiUrl: inputLimenApiUrl }),
     maxLookups: parseMaxLookups(reader.getInput("max-lookups") || "5"),
     ...(inputLedgerUrl || environmentLedgerUrl
       ? { ledgerUrl: inputLedgerUrl || environmentLedgerUrl }
