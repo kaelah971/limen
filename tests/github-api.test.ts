@@ -97,6 +97,16 @@ describe("GitHub App metadata schema", () => {
       /private_key|installation_token|telegraph_private_key/i.test(name),
     )).toBe(false);
   });
+
+  it("has no persisted installation-token storage or disconnect cleanup path", async () => {
+    const [migration, storeSource] = await Promise.all([
+      readFile(MIGRATION_PATH, "utf8"),
+      readFile("apps/api/src/github-app-store.ts", "utf8"),
+    ]);
+
+    expect(migration).not.toMatch(/github_installation_tokens|installation_token\s+(text|varchar|json)/i);
+    expect(storeSource).not.toMatch(/delete[\s\S]{0,160}installation[\s_]?token|installation[\s_]?token[\s\S]{0,160}delete/i);
+  });
 });
 
 describe("atomic setup PR persistence migration", () => {
@@ -175,6 +185,117 @@ describe("GitHub integration health persistence", () => {
     expect(query.in).toHaveBeenCalledWith("lifecycle_state", ["CONFIGURED", "VERIFIED", "NEEDS_ATTENTION"]);
     expect(query.update.mock.calls[0]?.[0]).not.toHaveProperty("latest_decision");
     expect(query.update.mock.calls[0]?.[0]).not.toHaveProperty("latest_evaluation_at");
+  });
+});
+
+describe("GitHub disconnect and historical persistence", () => {
+  it("reads bounded newest-first history for a bound disconnected installation", async () => {
+    const authorizationQuery = {
+      select: vi.fn(),
+      eq: vi.fn(),
+      maybeSingle: vi.fn(),
+    };
+    authorizationQuery.select.mockReturnValue(authorizationQuery);
+    authorizationQuery.eq.mockReturnValue(authorizationQuery);
+    authorizationQuery.maybeSingle.mockResolvedValue({
+      data: { repository_id: 304 },
+      error: null,
+    });
+    const historyQuery = {
+      select: vi.fn(),
+      eq: vi.fn(),
+      order: vi.fn(),
+      limit: vi.fn(),
+    };
+    historyQuery.select.mockReturnValue(historyQuery);
+    historyQuery.eq.mockReturnValue(historyQuery);
+    historyQuery.order.mockReturnValue(historyQuery);
+    historyQuery.limit.mockResolvedValue({
+      data: [{
+        github_run_id: 401,
+        run_attempt: 2,
+        workflow_ref: "kaelah971/limen/.github/workflows/limen.yml@refs/heads/main",
+        commit_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        decision: "REVIEW",
+        receipt_id: "receipt-401",
+        evaluated_at: "2026-09-06T02:00:00.000Z",
+      }],
+      error: null,
+    });
+    const client = {
+      from: vi.fn((table: string) => table === "github_repositories" ? authorizationQuery : historyQuery),
+    };
+    const store = new SupabaseGitHubAppStore(client as never);
+
+    await expect(store.listAuthorizedRepositoryEvaluations(304, AUTH_USER_ID, 100)).resolves.toEqual([{
+      githubRunId: 401,
+      githubRunAttempt: 2,
+      workflowRef: "kaelah971/limen/.github/workflows/limen.yml@refs/heads/main",
+      commitSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      decision: "REVIEW",
+      receiptId: "receipt-401",
+      evaluatedAt: "2026-09-06T02:00:00.000Z",
+    }]);
+    expect(authorizationQuery.eq).toHaveBeenCalledWith(
+      "github_installations.bound_by_auth_user_id",
+      AUTH_USER_ID,
+    );
+    expect(historyQuery.order).toHaveBeenCalledWith("evaluated_at", { ascending: false });
+    expect(historyQuery.limit).toHaveBeenCalledWith(100);
+  });
+
+  it("disconnects installation metadata and repositories without deleting history", async () => {
+    const installationQuery = { update: vi.fn(), eq: vi.fn() };
+    const repositoryQuery = { update: vi.fn(), eq: vi.fn() };
+    installationQuery.update.mockReturnValue(installationQuery);
+    installationQuery.eq.mockResolvedValue({ error: null });
+    repositoryQuery.update.mockReturnValue(repositoryQuery);
+    repositoryQuery.eq.mockResolvedValue({ error: null });
+    const client = {
+      from: vi.fn((table: string) => table === "github_installations" ? installationQuery : repositoryQuery),
+    };
+    const store = new SupabaseGitHubAppStore(client as never);
+
+    await expect(store.disconnectInstallation(201)).resolves.toBeUndefined();
+
+    expect(installationQuery.update).toHaveBeenCalledWith(expect.objectContaining({ connection_state: "DISCONNECTED" }));
+    expect(repositoryQuery.update).toHaveBeenCalledWith(expect.objectContaining({ lifecycle_state: "DISCONNECTED" }));
+    expect(client.from).not.toHaveBeenCalledWith("repository_evaluations");
+  });
+
+  it("scopes repository removal to the installation and supplied IDs", async () => {
+    const query = { update: vi.fn(), eq: vi.fn(), in: vi.fn() };
+    query.update.mockReturnValue(query);
+    query.eq.mockReturnValue(query);
+    query.in.mockResolvedValue({ error: null });
+    const client = { from: vi.fn(() => query) };
+    const store = new SupabaseGitHubAppStore(client as never);
+
+    await expect(store.removeInstallationRepositories(201, [301, 302])).resolves.toBeUndefined();
+
+    expect(query.update).toHaveBeenCalledWith(expect.objectContaining({ lifecycle_state: "DISCONNECTED" }));
+    expect(query.eq).toHaveBeenCalledWith("installation_id", 201);
+    expect(query.in).toHaveBeenCalledWith("repository_id", [301, 302]);
+  });
+
+  it("starts added repositories at SETUP_REQUIRED", async () => {
+    const upsert = vi.fn().mockResolvedValue({ error: null });
+    const client = { from: vi.fn(() => ({ upsert })) };
+    const store = new SupabaseGitHubAppStore(client as never);
+
+    await expect(store.addInstallationRepositories(201, [{
+      repositoryId: 301,
+      ownerLogin: "kaelah971",
+      repositoryName: "limen",
+      fullName: "kaelah971/limen",
+      defaultBranch: "main",
+    }])).resolves.toBeUndefined();
+
+    expect(upsert).toHaveBeenCalledWith([expect.objectContaining({
+      repository_id: 301,
+      installation_id: 201,
+      lifecycle_state: "SETUP_REQUIRED",
+    })], { onConflict: "repository_id" });
   });
 });
 
@@ -665,6 +786,16 @@ interface RepositoryFixture {
   setupPullRequest: SetupPullRequestRecord | null;
 }
 
+interface HistoricalEvaluationFixture {
+  githubRunId: number;
+  githubRunAttempt: number;
+  workflowRef: string;
+  commitSha: string;
+  decision: "PASS" | "HOLD" | "REVIEW";
+  receiptId: string | null;
+  evaluatedAt: string;
+}
+
 const SECOND_REPOSITORY_ID = 302;
 const UNBOUND_REPOSITORY_ID = 303;
 const DISCONNECTED_REPOSITORY_ID = 304;
@@ -718,6 +849,8 @@ function repositoryFixture(
 
 class FakeRepositoryStore extends FakeAuthorizationStore {
   readonly repositories = new Map<number, RepositoryFixture>();
+  readonly historicalEvaluations = new Map<number, HistoricalEvaluationFixture[]>();
+  readonly historyLimits: number[] = [];
   readonly recordedSetupPullRequests: Parameters<FakeRepositoryStore["recordSetupPullRequestAndTransition"]>[0][] = [];
   recordError: Error | undefined;
   transitionCount = 0;
@@ -739,6 +872,22 @@ class FakeRepositoryStore extends FakeAuthorizationStore {
       ? undefined
       : this.installations.get(repository.installationId);
     return installation?.boundByAuthUserId === authUserId ? repository ?? null : null;
+  }
+
+  async listAuthorizedRepositoryEvaluations(
+    repositoryId: number,
+    authUserId: string,
+    limit: number,
+  ): Promise<HistoricalEvaluationFixture[] | null> {
+    this.historyLimits.push(limit);
+    const repository = this.repositories.get(repositoryId);
+    const installation = repository === undefined
+      ? undefined
+      : this.installations.get(repository.installationId);
+    if (installation?.boundByAuthUserId !== authUserId) {
+      return null;
+    }
+    return (this.historicalEvaluations.get(repositoryId) ?? []).slice(0, limit);
   }
 
   async getInstallationState(
@@ -1020,6 +1169,74 @@ describe("authenticated repository APIs", () => {
     expect(unboundResponse.status).toBe(404);
   });
 
+  it("keeps sanitized history readable for the bound user after disconnect", async () => {
+    const store = new FakeRepositoryStore();
+    addRepositoryFixtures(store);
+    const history = [
+      {
+        githubRunId: 402,
+        githubRunAttempt: 1,
+        workflowRef: "kaelah971/limen/.github/workflows/limen.yml@refs/heads/main",
+        commitSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        decision: "HOLD" as const,
+        receiptId: "receipt-402",
+        evaluatedAt: "2026-09-06T02:00:00.000Z",
+      },
+      {
+        githubRunId: 401,
+        githubRunAttempt: 1,
+        workflowRef: "kaelah971/limen/.github/workflows/limen.yml@refs/heads/main",
+        commitSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        decision: "PASS" as const,
+        receiptId: null,
+        evaluatedAt: "2026-09-06T01:00:00.000Z",
+      },
+    ];
+    store.historicalEvaluations.set(301, history);
+    store.historicalEvaluations.set(DISCONNECTED_REPOSITORY_ID, [{
+      ...history[0],
+      githubRunId: 404,
+    }]);
+    const transport = new FakeRepositoryGitHubTransport();
+    const url = await startRepositoryServer(
+      store,
+      authClient({ user: githubAuthUser(), error: null }),
+      makeRepositorySetupService(store, transport),
+    );
+
+    const activeHistoryResponse = await repositoryRequest(
+      url,
+      "/v1/github/repositories/301/evaluations",
+    );
+    const disconnectedHistoryResponse = await repositoryRequest(
+      url,
+      `/v1/github/repositories/${DISCONNECTED_REPOSITORY_ID}/evaluations`,
+    );
+    const otherUserResponse = await repositoryRequest(
+      url,
+      `/v1/github/repositories/${SECOND_REPOSITORY_ID}/evaluations`,
+    );
+    const unboundResponse = await repositoryRequest(
+      url,
+      `/v1/github/repositories/${UNBOUND_REPOSITORY_ID}/evaluations`,
+    );
+
+    expect(activeHistoryResponse.status).toBe(200);
+    expect(await activeHistoryResponse.json()).toEqual({
+      repositoryId: 301,
+      evaluations: history,
+    });
+    expect(disconnectedHistoryResponse.status).toBe(200);
+    expect(await disconnectedHistoryResponse.json()).toMatchObject({
+      repositoryId: DISCONNECTED_REPOSITORY_ID,
+      evaluations: [{ githubRunId: 404, decision: "HOLD" }],
+    });
+    expect(otherUserResponse.status).toBe(404);
+    expect(unboundResponse.status).toBe(404);
+    expect(store.historyLimits).toEqual([100, 100, 100, 100]);
+    expect(JSON.stringify(history)).not.toMatch(/token|private|secret|password/i);
+  });
+
   it("requires authentication before repository access", async () => {
     const store = new FakeRepositoryStore();
     addRepositoryFixtures(store);
@@ -1260,6 +1477,15 @@ describe("authenticated repository APIs", () => {
       makeRepositorySetupService(store, transport),
     );
 
+    const previewResponse = await repositoryRequest(
+      url,
+      `/v1/github/repositories/${DISCONNECTED_REPOSITORY_ID}/setup-preview`,
+    );
+    expect(previewResponse.status).toBe(409);
+    expect(await previewResponse.json()).toMatchObject({ code: "INSTALLATION_DISCONNECTED" });
+    expect(store.mintCount).toBe(0);
+    expect(transport.calls).toHaveLength(0);
+
     const response = await repositoryRequest(
       url,
       `/v1/github/repositories/${DISCONNECTED_REPOSITORY_ID}/setup-pr`,
@@ -1270,6 +1496,7 @@ describe("authenticated repository APIs", () => {
     expect(await response.json()).toMatchObject({ code: "INSTALLATION_DISCONNECTED" });
     expect(store.mintCount).toBe(0);
     expect(transport.calls).toHaveLength(0);
+    expect(store.recordedSetupPullRequests).toHaveLength(0);
   });
 
   it("does not claim setup success when persistence fails", async () => {

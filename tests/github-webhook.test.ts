@@ -48,11 +48,12 @@ function githubRepositoryPayload(metadata: GitHubRepositoryMetadata) {
 
 function installationCreatedPayload(
   repositories = [repository(FIRST_REPOSITORY_ID)],
+  installationId = INSTALLATION_ID,
 ) {
   return {
     action: "created",
     installation: {
-      id: INSTALLATION_ID,
+      id: installationId,
       account: {
         id: 501,
         login: "limen-owner",
@@ -318,6 +319,7 @@ describe("GitHub webhook lifecycle", () => {
     const store = new FakeGitHubAppStore();
     const { url } = await startServer(store);
     store.historicalEvaluationIds.add(401);
+    store.setupPullRequests.set(`${FIRST_REPOSITORY_ID}:42`, { state: "MERGED" });
     await postWebhook(url, Buffer.from(JSON.stringify(installationCreatedPayload([
       repository(FIRST_REPOSITORY_ID),
       repository(SECOND_REPOSITORY_ID),
@@ -336,11 +338,49 @@ describe("GitHub webhook lifecycle", () => {
     expect(store.repositories.get(FIRST_REPOSITORY_ID)?.lifecycleState).toBe("DISCONNECTED");
     expect(store.repositories.get(SECOND_REPOSITORY_ID)?.lifecycleState).toBe("DISCONNECTED");
     expect(store.historicalEvaluationIds.has(401)).toBe(true);
+    expect(store.setupPullRequests.get(`${FIRST_REPOSITORY_ID}:42`)?.state).toBe("MERGED");
+  });
+
+  it("does not repeat uninstall effects for a duplicate delivery", async () => {
+    const store = new FakeGitHubAppStore();
+    const { url } = await startServer(store);
+    await postWebhook(url, Buffer.from(JSON.stringify(installationCreatedPayload([
+      repository(FIRST_REPOSITORY_ID),
+      repository(SECOND_REPOSITORY_ID),
+    ]))), { "X-GitHub-Delivery": "uninstall-seed" });
+    const body = Buffer.from(JSON.stringify({
+      action: "deleted",
+      installation: { id: INSTALLATION_ID },
+    }));
+
+    const first = await postWebhook(url, body, {
+      "X-GitHub-Delivery": "uninstall-duplicate",
+      "X-GitHub-Event": "installation",
+    });
+    const second = await postWebhook(url, body, {
+      "X-GitHub-Delivery": "uninstall-duplicate",
+      "X-GitHub-Event": "installation",
+    });
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(202);
+    expect(store.mutationCount).toBe(2);
+    expect(store.repositories.get(FIRST_REPOSITORY_ID)?.lifecycleState).toBe("DISCONNECTED");
+    expect(store.repositories.get(SECOND_REPOSITORY_ID)?.lifecycleState).toBe("DISCONNECTED");
   });
 
   it("adds only repositories supplied by installation_repositories.added", async () => {
     const store = new FakeGitHubAppStore();
     const { url } = await startServer(store);
+    store.installations.set(INSTALLATION_ID, {
+      installationId: INSTALLATION_ID,
+      accountId: 501,
+      accountLogin: "limen-owner",
+      accountType: "Organization",
+      installedByGithubUserId: INSTALLER_GITHUB_USER_ID,
+      boundByAuthUserId: "auth-user",
+      connectionState: "ACTIVE",
+    });
     store.repositories.set(FIRST_REPOSITORY_ID, {
       ...repository(FIRST_REPOSITORY_ID),
       installationId: INSTALLATION_ID,
@@ -364,6 +404,15 @@ describe("GitHub webhook lifecycle", () => {
   it("disconnects only repositories supplied by installation_repositories.removed", async () => {
     const store = new FakeGitHubAppStore();
     const { url } = await startServer(store);
+    store.installations.set(INSTALLATION_ID, {
+      installationId: INSTALLATION_ID,
+      accountId: 501,
+      accountLogin: "limen-owner",
+      accountType: "Organization",
+      installedByGithubUserId: INSTALLER_GITHUB_USER_ID,
+      boundByAuthUserId: "auth-user",
+      connectionState: "ACTIVE",
+    });
     store.repositories.set(FIRST_REPOSITORY_ID, {
       ...repository(FIRST_REPOSITORY_ID),
       installationId: INSTALLATION_ID,
@@ -373,6 +422,12 @@ describe("GitHub webhook lifecycle", () => {
       ...repository(SECOND_REPOSITORY_ID),
       installationId: INSTALLATION_ID,
       lifecycleState: "CONFIGURED",
+    });
+    const outsideRepositoryId = 999;
+    store.repositories.set(outsideRepositoryId, {
+      ...repository(outsideRepositoryId),
+      installationId: 999,
+      lifecycleState: "VERIFIED",
     });
 
     const response = await postWebhook(url, Buffer.from(JSON.stringify({
@@ -387,6 +442,112 @@ describe("GitHub webhook lifecycle", () => {
     expect(response.status).toBe(200);
     expect(store.repositories.get(FIRST_REPOSITORY_ID)?.lifecycleState).toBe("DISCONNECTED");
     expect(store.repositories.get(SECOND_REPOSITORY_ID)?.lifecycleState).toBe("CONFIGURED");
+    expect(store.installations.get(INSTALLATION_ID)?.connectionState).toBe("ACTIVE");
+    expect(store.repositories.get(outsideRepositoryId)?.lifecycleState).toBe("VERIFIED");
+  });
+
+  it("does not repeat repository removal effects for a duplicate delivery", async () => {
+    const store = new FakeGitHubAppStore();
+    const { url } = await startServer(store);
+    store.installations.set(INSTALLATION_ID, {
+      installationId: INSTALLATION_ID,
+      accountId: 501,
+      accountLogin: "limen-owner",
+      accountType: "Organization",
+      installedByGithubUserId: INSTALLER_GITHUB_USER_ID,
+      boundByAuthUserId: "auth-user",
+      connectionState: "ACTIVE",
+    });
+    store.repositories.set(FIRST_REPOSITORY_ID, {
+      ...repository(FIRST_REPOSITORY_ID),
+      installationId: INSTALLATION_ID,
+      lifecycleState: "VERIFIED",
+    });
+    const body = Buffer.from(JSON.stringify({
+      action: "removed",
+      installation: { id: INSTALLATION_ID },
+      repositories_removed: [githubRepositoryPayload(repository(FIRST_REPOSITORY_ID))],
+    }));
+
+    const first = await postWebhook(url, body, {
+      "X-GitHub-Delivery": "removal-duplicate",
+      "X-GitHub-Event": "installation_repositories",
+    });
+    const second = await postWebhook(url, body, {
+      "X-GitHub-Delivery": "removal-duplicate",
+      "X-GitHub-Event": "installation_repositories",
+    });
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(202);
+    expect(store.mutationCount).toBe(1);
+    expect(store.repositories.get(FIRST_REPOSITORY_ID)?.lifecycleState).toBe("DISCONNECTED");
+  });
+
+  it("re-adds a disconnected repository as SETUP_REQUIRED without restoring verification", async () => {
+    const store = new FakeGitHubAppStore();
+    const { url } = await startServer(store);
+    store.installations.set(INSTALLATION_ID, {
+      installationId: INSTALLATION_ID,
+      accountId: 501,
+      accountLogin: "limen-owner",
+      accountType: "Organization",
+      installedByGithubUserId: INSTALLER_GITHUB_USER_ID,
+      boundByAuthUserId: "auth-user",
+      connectionState: "ACTIVE",
+    });
+    store.repositories.set(FIRST_REPOSITORY_ID, {
+      ...repository(FIRST_REPOSITORY_ID),
+      installationId: INSTALLATION_ID,
+      lifecycleState: "DISCONNECTED",
+    });
+
+    const response = await postWebhook(url, Buffer.from(JSON.stringify({
+      action: "added",
+      installation: { id: INSTALLATION_ID },
+      repositories_added: [githubRepositoryPayload(repository(FIRST_REPOSITORY_ID))],
+    })), {
+      "X-GitHub-Delivery": "repositories-readded",
+      "X-GitHub-Event": "installation_repositories",
+    });
+
+    expect(response.status).toBe(200);
+    expect(store.installations.get(INSTALLATION_ID)?.connectionState).toBe("ACTIVE");
+    expect(store.repositories.get(FIRST_REPOSITORY_ID)?.lifecycleState).toBe("SETUP_REQUIRED");
+  });
+
+  it("starts a newly installed installation unbound without restoring old verification", async () => {
+    const store = new FakeGitHubAppStore();
+    const { url } = await startServer(store);
+    store.installations.set(INSTALLATION_ID, {
+      installationId: INSTALLATION_ID,
+      accountId: 501,
+      accountLogin: "limen-owner",
+      accountType: "Organization",
+      installedByGithubUserId: INSTALLER_GITHUB_USER_ID,
+      boundByAuthUserId: "auth-user",
+      connectionState: "DISCONNECTED",
+    });
+    store.repositories.set(FIRST_REPOSITORY_ID, {
+      ...repository(FIRST_REPOSITORY_ID),
+      installationId: INSTALLATION_ID,
+      lifecycleState: "VERIFIED",
+    });
+
+    const response = await postWebhook(url, Buffer.from(JSON.stringify(installationCreatedPayload(
+      [repository(FIRST_REPOSITORY_ID)],
+      999,
+    ))), { "X-GitHub-Delivery": "installation-recreated" });
+
+    expect(response.status).toBe(200);
+    expect(store.installations.get(999)).toMatchObject({
+      boundByAuthUserId: null,
+      connectionState: "ACTIVE",
+    });
+    expect(store.repositories.get(FIRST_REPOSITORY_ID)).toMatchObject({
+      installationId: 999,
+      lifecycleState: "SETUP_REQUIRED",
+    });
   });
 
   it.each([

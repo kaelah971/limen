@@ -21,6 +21,7 @@ import {
   GitHubSetupPersistenceError,
   type GitHubEvaluationInput,
   type GitHubEvaluationStore,
+  type GitHubHistoricalEvaluationRecord,
   type GitHubIntegrationHealthInput,
   type GitHubIntegrationHealthStore,
 } from "./github-app-store";
@@ -47,6 +48,7 @@ import {
 export const GITHUB_WEBHOOK_MAX_BODY_BYTES = 2 * 1024 * 1024;
 export const GITHUB_EVALUATION_MAX_BODY_BYTES = 2 * 1024 * 1024;
 export const GITHUB_INTEGRATION_HEALTH_MAX_BODY_BYTES = 2 * 1024 * 1024;
+export const GITHUB_HISTORICAL_EVALUATIONS_LIMIT = 100;
 
 export interface GitHubWebhookRouteOptions {
   secret: string;
@@ -211,6 +213,20 @@ function sanitizedSetupPullRequest(
         url: setupPullRequest.prUrl,
         state: setupPullRequest.state,
       };
+}
+
+function sanitizedHistoricalEvaluation(
+  evaluation: GitHubHistoricalEvaluationRecord,
+): Record<string, unknown> {
+  return {
+    githubRunId: evaluation.githubRunId,
+    githubRunAttempt: evaluation.githubRunAttempt,
+    workflowRef: evaluation.workflowRef,
+    commitSha: evaluation.commitSha,
+    decision: evaluation.decision,
+    receiptId: evaluation.receiptId,
+    evaluatedAt: evaluation.evaluatedAt,
+  };
 }
 
 function setupRepository(repository: GitHubRepositoryRecord): SetupRepository {
@@ -1198,6 +1214,23 @@ export async function handleGitHubRepositoryRequest(
         throw repositoryNotFound();
       }
       return response(200, sanitizedRepository(repository));
+    }
+
+    if (path.length === 5 && path[4] === "evaluations" && request.method === "GET") {
+      const user = await authenticateUser(request, options.authClient, options.store);
+      const repositoryId = repositoryIdValue(repositoryPath);
+      const evaluations = await options.store.listAuthorizedRepositoryEvaluations(
+        repositoryId,
+        user.authUserId,
+        GITHUB_HISTORICAL_EVALUATIONS_LIMIT,
+      );
+      if (evaluations === null) {
+        throw repositoryNotFound();
+      }
+      return response(200, {
+        repositoryId,
+        evaluations: evaluations.map(sanitizedHistoricalEvaluation),
+      });
     }
 
     if (

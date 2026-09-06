@@ -80,6 +80,16 @@ export interface GitHubEvaluationRecord extends GitHubEvaluationInput {
   id: string;
 }
 
+export interface GitHubHistoricalEvaluationRecord {
+  githubRunId: number;
+  githubRunAttempt: number;
+  workflowRef: string;
+  commitSha: string;
+  decision: LimenReleaseDecision;
+  receiptId: string | null;
+  evaluatedAt: string;
+}
+
 export interface GitHubIntegrationHealthInput {
   repositoryId: number;
   observedAt: string;
@@ -90,12 +100,20 @@ export interface GitHubEvaluationStore {
   recordGitHubEvaluation(input: GitHubEvaluationInput): Promise<GitHubEvaluationRecord>;
 }
 
+export interface GitHubHistoricalEvaluationStore {
+  listAuthorizedRepositoryEvaluations(
+    repositoryId: number,
+    authUserId: string,
+    limit: number,
+  ): Promise<GitHubHistoricalEvaluationRecord[] | null>;
+}
+
 export interface GitHubIntegrationHealthStore {
   getEvaluationRepository(repositoryId: number): Promise<GitHubEvaluationRepositoryRecord | null>;
   markRepositoryNeedsAttention(input: GitHubIntegrationHealthInput): Promise<void>;
 }
 
-export interface GitHubRepositoryStore extends GitHubInstallationAuthorizationStore, SetupPersistence {
+export interface GitHubRepositoryStore extends GitHubInstallationAuthorizationStore, SetupPersistence, GitHubHistoricalEvaluationStore {
   listAuthorizedRepositories(authUserId: string): Promise<GitHubRepositoryRecord[]>;
   getAuthorizedRepository(
     repositoryId: number,
@@ -441,6 +459,42 @@ function evaluationRecord(value: unknown): GitHubEvaluationRecord {
     receiptId: row.receipt_id === null || row.receipt_id === undefined
       ? null
       : requiredRowText(row.receipt_id),
+    evaluatedAt,
+  };
+}
+
+function historicalEvaluationRecord(value: unknown): GitHubHistoricalEvaluationRecord {
+  const row = objectRow(value);
+  const githubRunId = numericValue(row.github_run_id);
+  const githubRunAttempt = numericValue(row.run_attempt);
+  const workflowRef = requiredRowText(row.workflow_ref);
+  const commitSha = requiredRowText(row.commit_sha);
+  const decision = releaseDecision(row.decision);
+  const receiptId = row.receipt_id === null || row.receipt_id === undefined
+    ? null
+    : requiredRowText(row.receipt_id);
+  const evaluatedAt = requiredRowText(row.evaluated_at);
+  if (
+    githubRunId === null
+    || githubRunId <= 0
+    || githubRunAttempt === null
+    || githubRunAttempt <= 0
+    || workflowRef === null
+    || commitSha === null
+    || !/^[0-9a-fA-F]{40}$/.test(commitSha)
+    || decision === null
+    || (row.receipt_id !== null && row.receipt_id !== undefined && receiptId === null)
+    || evaluatedAt === null
+  ) {
+    throw new GitHubAppStoreError();
+  }
+  return {
+    githubRunId,
+    githubRunAttempt,
+    workflowRef,
+    commitSha,
+    decision,
+    receiptId,
     evaluatedAt,
   };
 }
@@ -801,6 +855,49 @@ export class SupabaseGitHubAppStore implements
       ...repository,
       setupPullRequest: await this.getOpenSetupPullRequest(repository.repositoryId),
     };
+  }
+
+  async listAuthorizedRepositoryEvaluations(
+    repositoryId: number,
+    authUserId: string,
+    limit: number,
+  ): Promise<GitHubHistoricalEvaluationRecord[] | null> {
+    if (!Number.isSafeInteger(repositoryId) || repositoryId <= 0 || !Number.isSafeInteger(limit) || limit <= 0) {
+      throw new GitHubAppStoreError();
+    }
+    const authorizationResult = await this.client
+      .from("github_repositories")
+      .select("repository_id, github_installations!inner(installation_id)")
+      .eq("repository_id", repositoryId)
+      .eq("github_installations.bound_by_auth_user_id", authUserId)
+      .maybeSingle();
+    if (authorizationResult.error !== null) {
+      throwStoreError(authorizationResult.error);
+    }
+    if (authorizationResult.data === null) {
+      return null;
+    }
+    if (numericValue(objectRow(authorizationResult.data).repository_id) !== repositoryId) {
+      throw new GitHubAppStoreError();
+    }
+
+    const historyResult = await this.client
+      .from("repository_evaluations")
+      .select("github_run_id, run_attempt, workflow_ref, commit_sha, decision, receipt_id, evaluated_at")
+      .eq("repository_id", repositoryId)
+      .order("evaluated_at", { ascending: false })
+      .limit(limit);
+    if (historyResult.error !== null) {
+      throwStoreError(historyResult.error);
+    }
+    if (!Array.isArray(historyResult.data)) {
+      throw new GitHubAppStoreError();
+    }
+    try {
+      return historyResult.data.map(historicalEvaluationRecord);
+    } catch {
+      throw new GitHubAppStoreError();
+    }
   }
 
   async getInstallationState(

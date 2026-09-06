@@ -146,6 +146,9 @@ function routeTemplate(request: IncomingMessage): string {
       if (path.length === 5 && path[4] === "setup-pr") {
         return "/v1/github/repositories/:repositoryId/setup-pr";
       }
+      if (path.length === 5 && path[4] === "evaluations") {
+        return "/v1/github/repositories/:repositoryId/evaluations";
+      }
     }
     return "unknown";
   } catch {
@@ -486,7 +489,11 @@ async function handleRequest(
       && (
         path.length === 3
         || path.length === 4
-        || (path.length === 5 && (path[4] === "setup-preview" || path[4] === "setup-pr"))
+        || (path.length === 5 && (
+          path[4] === "setup-preview"
+          || path[4] === "setup-pr"
+          || path[4] === "evaluations"
+        ))
       )
     ) {
       if (options.githubRepositoryApi === undefined) {
