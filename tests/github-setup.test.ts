@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createGitHubInstallationClient,
   createSetupService,
+  buildLimenWorkflow,
+  DEFAULT_LIMEN_POLICY,
   GitHubInstallationClientError,
   SetupPersistenceError,
   type GitHubInstallationApi,
@@ -320,6 +322,19 @@ describe("GitHub installation client", () => {
 });
 
 describe("GitHub setup preview", () => {
+  it("emits the secure canonical workflow and policy contract", () => {
+    const workflow = buildLimenWorkflow(SETUP_CONFIG);
+
+    expect(workflow).toBe(WORKFLOW_CONTENT);
+    expect(workflow).toContain("contents: read");
+    expect(workflow).toContain("id-token: write");
+    expect(workflow).not.toContain("actions/checkout");
+    expect(workflow).not.toContain("pull_request_target");
+    expect(workflow).not.toContain("13.237.89.59");
+    expect(workflow).not.toContain("LIMEN_API_KEY");
+    expect(DEFAULT_LIMEN_POLICY).toBe(POLICY_CONTENT);
+  });
+
   it("proposes exactly the two required files for an empty repository", async () => {
     const { service, transport } = makeSetupService();
 
@@ -557,5 +572,24 @@ describe("GitHub setup pull request generation", () => {
     })).rejects.toMatchObject({ code: "SETUP_CONFIG_INVALID" });
     expect(transport.calls).toHaveLength(0);
     expect(persistence.recordedInputs).toHaveLength(0);
+  });
+
+  it.each([
+    "http://api.example.test",
+    "https://user:password@api.example.test",
+    "https://api.example.test?token=secret",
+    "https://api.example.test/#fragment",
+  ])("rejects unsafe Limen API URL %s", (limenApiUrl) => {
+    expect(() => buildLimenWorkflow({
+      actionSha: ACTION_SHA,
+      limenApiUrl,
+    })).toThrowError(expect.objectContaining({ code: "SETUP_CONFIG_INVALID" }));
+  });
+
+  it("normalizes trailing slashes from the Limen API URL", () => {
+    expect(buildLimenWorkflow({
+      actionSha: ACTION_SHA,
+      limenApiUrl: "https://api.example.test/base///",
+    })).toContain("limen-api-url: https://api.example.test/base");
   });
 });

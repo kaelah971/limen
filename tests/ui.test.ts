@@ -31,6 +31,10 @@ import {
   type ReceiptSnapshot,
 } from "../packages/receipts/src";
 import {
+  buildLimenWorkflow,
+  DEFAULT_LIMEN_POLICY,
+} from "../packages/github-app/src";
+import {
   CURRENT_ACTION_REFERENCE,
   CURRENT_TELEGRAPH_ENGINE_URL,
   CURRENT_TELEGRAPH_NETWORK,
@@ -38,6 +42,14 @@ import {
   MINIMAL_POLICY,
   RECOMMENDED_POLICY,
 } from "../app/lib/setup-contract";
+
+const { SETUP_ACTION_SHA, SETUP_API_URL } = vi.hoisted(() => {
+  const actionSha = "a91d36bfe8eaab5d95f791e39449878239bf948d";
+  const apiUrl = "https://api.example.test";
+  process.env.LIMEN_ACTION_SHA = actionSha;
+  process.env.LIMEN_PUBLIC_API_URL = apiUrl;
+  return { SETUP_ACTION_SHA: actionSha, SETUP_API_URL: apiUrl };
+});
 
 const HOLD_SNAPSHOT: ReceiptSnapshot = {
   schemaVersion: RECEIPT_SCHEMA_VERSION,
@@ -358,16 +370,25 @@ describe("P7 route and accessibility boundaries", () => {
     ]);
     const docs = `${readme}\n${actionDocs}\n${exampleWorkflow}`;
 
-    expect(CURRENT_ACTION_REFERENCE).toBe("kaelah971/limen@a91d36bfe8eaab5d95f791e39449878239bf948d");
+    expect(CURRENT_ACTION_REFERENCE).toBe(`kaelah971/limen@${SETUP_ACTION_SHA}`);
     expect(CURRENT_TELEGRAPH_ENGINE_URL).toBe("http://13.237.89.59:7044/engine/v1/ask");
     expect(CURRENT_TELEGRAPH_NETWORK).toBe("eip155:84532");
     expect(CURRENT_WORKFLOW).toContain("pull_request:");
     expect(CURRENT_WORKFLOW).toContain("contents: read");
+    expect(CURRENT_WORKFLOW).toContain("id-token: write");
     expect(CURRENT_WORKFLOW).toContain(`uses: ${CURRENT_ACTION_REFERENCE}`);
     expect(CURRENT_WORKFLOW).toContain("github-token: ${{ github.token }}");
     expect(CURRENT_WORKFLOW).toContain("telegraph-private-key: ${{ secrets.LIMEN_TELEGRAPH_PRIVATE_KEY }}");
     expect(CURRENT_WORKFLOW).toContain("telegraph-engine-url: ${{ vars.TELEGRAPH_ENGINE_URL }}");
-    expect(RECOMMENDED_POLICY).toContain("missing_external_evidence: review");
+    expect(CURRENT_WORKFLOW).toContain(`limen-api-url: ${SETUP_API_URL}`);
+    expect(CURRENT_WORKFLOW).not.toContain("actions/checkout");
+    expect(CURRENT_WORKFLOW).not.toContain("pull_request_target");
+    expect(CURRENT_WORKFLOW).not.toContain(CURRENT_TELEGRAPH_ENGINE_URL);
+    expect(CURRENT_WORKFLOW).toBe(buildLimenWorkflow({
+      actionSha: SETUP_ACTION_SHA,
+      limenApiUrl: SETUP_API_URL,
+    }));
+    expect(RECOMMENDED_POLICY).toBe(DEFAULT_LIMEN_POLICY.trimEnd());
     expect(MINIMAL_POLICY).toContain("block_severity:");
 
     expect(setupPage).toContain('export const metadata = getPageMetadata(');

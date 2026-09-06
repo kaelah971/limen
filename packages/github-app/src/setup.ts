@@ -141,7 +141,7 @@ export const DEFAULT_LIMEN_POLICY = `production:
 `;
 
 export function buildLimenWorkflow(config: SetupGenerationConfig): string {
-  validateGenerationConfig(config);
+  const normalizedConfig = validateGenerationConfig(config);
   return [
     "name: Limen",
     "",
@@ -161,17 +161,17 @@ export function buildLimenWorkflow(config: SetupGenerationConfig): string {
     "    runs-on: ubuntu-latest",
     "    steps:",
     "      - name: Evaluate release evidence",
-    `        uses: kaelah971/limen@${config.actionSha}`,
+    `        uses: kaelah971/limen@${normalizedConfig.actionSha}`,
     "        with:",
     "          github-token: ${{ github.token }}",
     "          telegraph-private-key: ${{ secrets.LIMEN_TELEGRAPH_PRIVATE_KEY }}",
     "          telegraph-engine-url: ${{ vars.TELEGRAPH_ENGINE_URL }}",
-    `          limen-api-url: ${config.limenApiUrl}`,
+    `          limen-api-url: ${normalizedConfig.limenApiUrl}`,
     "",
   ].join("\n");
 }
 
-function validateGenerationConfig(config: SetupGenerationConfig): void {
+function validateGenerationConfig(config: SetupGenerationConfig): SetupGenerationConfig {
   if (!ACTION_SHA_PATTERN.test(config.actionSha)) {
     throw new SetupConfigError();
   }
@@ -180,7 +180,13 @@ function validateGenerationConfig(config: SetupGenerationConfig): void {
   }
   try {
     const url = new URL(config.limenApiUrl);
-    if (url.protocol !== "https:" && url.protocol !== "http:") {
+    if (
+      url.protocol !== "https:" ||
+      url.username !== "" ||
+      url.password !== "" ||
+      url.search !== "" ||
+      url.hash !== ""
+    ) {
       throw new SetupConfigError();
     }
   } catch (error) {
@@ -189,6 +195,11 @@ function validateGenerationConfig(config: SetupGenerationConfig): void {
     }
     throw new SetupConfigError();
   }
+
+  return {
+    actionSha: config.actionSha,
+    limenApiUrl: config.limenApiUrl.replace(/\/+$/, ""),
+  };
 }
 
 function repositoryInput(repository: SetupRepository) {
