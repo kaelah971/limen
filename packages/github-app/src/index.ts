@@ -64,6 +64,14 @@ export {
   GitHubInstallationClientError,
 } from "./client";
 
+export {
+  createGitHubAppInstallationClient,
+} from "./octokit";
+
+export type {
+  GitHubAppAdapterDependencies,
+} from "./octokit";
+
 export type {
   GitHubCreateBranchInput,
   GitHubCreateFileInput,
