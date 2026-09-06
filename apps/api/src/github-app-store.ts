@@ -54,7 +54,15 @@ export interface GitHubRepositoryRecord {
   lifecycleState: RepositoryLifecycleState;
   latestDecision: LimenReleaseDecision | null;
   latestEvaluationAt: string | null;
-  setupPullRequest: SetupPullRequestRecord | null;
+  setupPullRequest: GitHubRepositorySetupPullRequestRecord | null;
+}
+
+export interface GitHubRepositorySetupPullRequestRecord {
+  repositoryId: number;
+  prNumber: number;
+  prUrl: string;
+  branchName: string;
+  state: "OPEN" | "MERGED" | "CLOSED";
 }
 
 export interface GitHubEvaluationRepositoryRecord {
@@ -307,17 +315,31 @@ function setupPullRequestRow(
   value: unknown,
   repositoryId: number,
 ): SetupPullRequestRecord {
+  const record = repositorySetupPullRequestRow(value, repositoryId);
+  if (record.state !== "OPEN") {
+    throw new GitHubAppStoreError();
+  }
+  return { ...record, state: "OPEN" };
+}
+
+function repositorySetupPullRequestRow(
+  value: unknown,
+  repositoryId: number,
+): GitHubRepositorySetupPullRequestRecord {
   const row = objectRow(value);
   const prNumber = numericValue(row.pr_number);
   const prUrl = requiredRowText(row.pr_url);
   const branchName = requiredRowText(row.branch_name);
+  const state = row.state === "OPEN" || row.state === "MERGED" || row.state === "CLOSED"
+    ? row.state
+    : null;
   if (
     numericValue(row.repository_id) !== repositoryId
     || prNumber === null
     || prNumber <= 0
     || prUrl === null
     || branchName === null
-    || row.state !== "OPEN"
+    || state === null
   ) {
     throw new GitHubAppStoreError();
   }
@@ -326,7 +348,7 @@ function setupPullRequestRow(
     prNumber,
     prUrl,
     branchName,
-    state: "OPEN",
+    state,
   };
 }
 
@@ -853,7 +875,7 @@ export class SupabaseGitHubAppStore implements
     const repository = repositoryRecord(data);
     return {
       ...repository,
-      setupPullRequest: await this.getOpenSetupPullRequest(repository.repositoryId),
+      setupPullRequest: await this.getLatestSetupPullRequest(repository.repositoryId),
     };
   }
 
@@ -934,6 +956,24 @@ export class SupabaseGitHubAppStore implements
       throwStoreError(error);
     }
     return data === null ? null : setupPullRequestRow(data, repositoryId);
+  }
+
+  private async getLatestSetupPullRequest(
+    repositoryId: number,
+  ): Promise<GitHubRepositorySetupPullRequestRecord | null> {
+    const { data, error } = await this.client
+      .from("github_setup_prs")
+      .select("repository_id, pr_number, pr_url, branch_name, state")
+      .eq("repository_id", repositoryId)
+      .order("updated_at", { ascending: false })
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error !== null) {
+      throwStoreError(error);
+    }
+    return data === null ? null : repositorySetupPullRequestRow(data, repositoryId);
   }
 
   async recordSetupPullRequestAndTransition(input: {

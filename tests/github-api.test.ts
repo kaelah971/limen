@@ -17,6 +17,7 @@ import {
   type SupabaseAuthUser,
   type UserAuthClient,
 } from "../apps/api/src/user-auth";
+import { handleGitHubRepositoryRequest } from "../apps/api/src/github-app-routes";
 import { createLedgerServer } from "../apps/api/src/server";
 import {
   createGitHubInstallationClient,
@@ -1112,6 +1113,101 @@ async function repositoryRequest(
 }
 
 describe("authenticated repository APIs", () => {
+  it("retains merged setup PR metadata without treating it as an open duplicate", async () => {
+    const repositoryQuery = {
+      select: vi.fn(),
+      eq: vi.fn(),
+      neq: vi.fn(),
+      maybeSingle: vi.fn(),
+    };
+    repositoryQuery.select.mockReturnValue(repositoryQuery);
+    repositoryQuery.eq.mockReturnValue(repositoryQuery);
+    repositoryQuery.neq.mockReturnValue(repositoryQuery);
+    repositoryQuery.maybeSingle.mockResolvedValue({
+      data: {
+        repository_id: 301,
+        installation_id: 401,
+        owner_login: "kaelah971",
+        repository_name: "limen",
+        full_name: "kaelah971/limen",
+        default_branch: "main",
+        lifecycle_state: "VERIFIED",
+        latest_decision: "PASS",
+        latest_evaluation_at: "2026-09-06T02:00:00.000Z",
+      },
+      error: null,
+    });
+
+    let stateFilter: string | undefined;
+    const mergedSetupPullRequest = {
+      repository_id: 301,
+      pr_number: 42,
+      pr_url: "https://github.com/kaelah971/limen/pull/42",
+      branch_name: "limen/setup-301-1700000000",
+      state: "MERGED",
+    };
+    const setupQuery = {
+      select: vi.fn(),
+      eq: vi.fn(),
+      order: vi.fn(),
+      limit: vi.fn(),
+      maybeSingle: vi.fn(),
+    };
+    setupQuery.select.mockReturnValue(setupQuery);
+    setupQuery.eq.mockImplementation((column: string, value: string) => {
+      if (column === "state") {
+        stateFilter = value;
+      }
+      return setupQuery;
+    });
+    setupQuery.order.mockReturnValue(setupQuery);
+    setupQuery.limit.mockReturnValue(setupQuery);
+    setupQuery.maybeSingle.mockImplementation(async () => ({
+      data: stateFilter === "OPEN" ? null : mergedSetupPullRequest,
+      error: null,
+    }));
+
+    const client = {
+      from: vi.fn((table: string) => {
+        if (table === "github_repositories") {
+          return repositoryQuery;
+        }
+        if (table === "github_setup_prs") {
+          return setupQuery;
+        }
+        return { upsert: vi.fn().mockResolvedValue({ error: null }) };
+      }),
+    };
+    const store = new SupabaseGitHubAppStore(client as never);
+    const response = await handleGitHubRepositoryRequest(
+      { method: "GET", headers: { authorization: "Bearer valid-token" } } as never,
+      ["v1", "github", "repositories", "301"],
+      {
+        authClient: authClient({ user: githubAuthUser(), error: null }),
+        store,
+        setupService: {} as never,
+        setupConfig: SETUP_CONFIG,
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      repositoryId: 301,
+      lifecycleState: "VERIFIED",
+      latestDecision: "PASS",
+      setupPullRequest: {
+        number: 42,
+        url: "https://github.com/kaelah971/limen/pull/42",
+        state: "MERGED",
+      },
+    });
+    expect(setupQuery.order).toHaveBeenCalledWith("updated_at", { ascending: false });
+
+    stateFilter = undefined;
+    await expect(store.getOpenSetupPullRequest(301)).resolves.toBeNull();
+    expect(setupQuery.eq).toHaveBeenCalledWith("state", "OPEN");
+  });
+
   it("lists only repositories from installations bound to the current user", async () => {
     const store = new FakeRepositoryStore();
     addRepositoryFixtures(store);
