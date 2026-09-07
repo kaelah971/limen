@@ -39,11 +39,11 @@ export default function Home() {
               Limen turns evidence into a deterministic PASS, HOLD, or REVIEW before code leaves the repository.
             </p>
             <div className="hero-actions">
-              <Link className="button button-primary" href={`/receipt/${ACTIVE_HOLD_RECEIPT_ID}`}>
-                Inspect real proof <ArrowRight aria-hidden="true" />
+              <Link className="button button-primary" href="/install">
+                Install Limen <ArrowRight aria-hidden="true" />
               </Link>
-              <Link className="button button-secondary" href="/demo">
-                See how it works <ArrowRight aria-hidden="true" />
+              <Link className="button button-secondary" href={`/receipt/${ACTIVE_HOLD_RECEIPT_ID}`}>
+                Inspect real proof <ArrowRight aria-hidden="true" />
               </Link>
             </div>
             <div className="proof-row" aria-label="Limen evidence integrations">

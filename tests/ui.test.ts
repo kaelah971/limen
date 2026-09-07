@@ -337,12 +337,16 @@ describe("P7 route and accessibility boundaries", () => {
       readFile("app/components/evidence-primitives.tsx", "utf8"),
     ]);
     expect(home).toContain('href="/demo"');
+    expect(home).toContain('href="/install"');
+    expect(home).toContain("Install Limen");
+    expect(home).toContain("Inspect real proof");
     expect(home).toContain("href={`/receipt/${ACTIVE_HOLD_RECEIPT_ID}`}");
     expect(home).toContain("Update the dependency to a version that clears all blocking findings under the current policy.");
     expect(home).not.toContain("beyond 4.17.21");
     expect(brand).toContain('href="/proof"');
     expect(brand).toContain("href={`/receipt/${ACTIVE_HOLD_RECEIPT_ID}`}");
-    expect(brand).toContain('href="/setup"');
+    expect(brand).toContain('href="/install"');
+    expect(brand).toContain("Install Limen");
     expect(brand).toContain('rel="noreferrer noopener"');
     expect(demo).toContain("DEMO_PULL_REQUEST_URL");
     expect(demo).toContain("ACTIVE_HOLD_RECEIPT_ID");
@@ -397,6 +401,8 @@ describe("P7 route and accessibility boundaries", () => {
     expect(setupPage).toContain("HOLD");
     expect(setupPage).toContain("REVIEW");
     expect(setupPage).toContain("setup failure is not");
+    expect(setupPage).toContain('href="/install"');
+    expect(setupPage).toContain("Install with GitHub App");
     expect(setupPage).toContain("TESTNET / DEMO ONLY");
     expect(setupPage).toContain("currently uses plain HTTP");
     expect(setupPage).toContain("Do not use this endpoint for production payment traffic.");

@@ -275,6 +275,7 @@ export default function SetupPage() {
               <p>The controlled demo shows a real HOLD path and its public proof. It is not a substitute for configuring your own repository.</p>
             </div>
             <div className="setup-link-list">
+              <Link className="button button-primary" href="/install">Install with GitHub App <ArrowRight aria-hidden="true" /></Link>
               <Link className="button button-primary" href="/demo">View real demo workflow <ArrowRight aria-hidden="true" /></Link>
               <Link className="button button-secondary" href={`/receipt/${ACTIVE_HOLD_RECEIPT_ID}`}>Inspect real proof <ArrowUpRight aria-hidden="true" /></Link>
               <SourceLink href="https://github.com/kaelah971/limen/blob/main/Docs/github-action.md">Read Action docs</SourceLink>
