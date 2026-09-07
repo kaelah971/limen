@@ -601,7 +601,8 @@ async function handleRequest(
       if (repositoryResponse.status >= 400) {
         requestStage.failure(undefined, {
           httpStatus: repositoryResponse.status,
-          errorCode: String(repositoryResponse.body.code ?? "GITHUB_REPOSITORY_API_ERROR"),
+          errorCode: repositoryResponse.diagnosticCode
+            ?? String(repositoryResponse.body.code ?? "GITHUB_REPOSITORY_API_ERROR"),
         });
       } else {
         requestStage.success({ httpStatus: repositoryResponse.status });

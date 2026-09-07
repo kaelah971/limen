@@ -82,6 +82,7 @@ class FakeGitHubTransport implements GitHubSetupTransport {
   readonly files = new Map<string, FileState>();
   defaultBranch = { branchName: "main", headSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" };
   branchError: Error | undefined;
+  defaultBranchError: Error | undefined;
   fileError: Error | undefined;
   pullRequestError: Error | undefined;
 
@@ -108,6 +109,9 @@ class FakeGitHubTransport implements GitHubSetupTransport {
     token: string,
   ) {
     this.calls.push({ kind: "getDefaultBranch", input, token });
+    if (this.defaultBranchError) {
+      throw this.defaultBranchError;
+    }
     return this.defaultBranch;
   }
 
@@ -320,6 +324,23 @@ describe("GitHub installation client", () => {
     expect(String(error)).not.toContain(GITHUB_APP_PRIVATE_KEY);
     expect(transport.calls).toHaveLength(0);
   });
+
+  it("classifies credential failures without exposing the provider error", async () => {
+    const transport = new FakeGitHubTransport();
+    const installation = makeInstallationClient(transport);
+    installation.mintInstallationToken.mockRejectedValueOnce(
+      Object.assign(new Error(`invalid ${GITHUB_APP_PRIVATE_KEY}`), { status: 401 }),
+    );
+
+    await expect(installation.client.withInstallationClient(
+      INSTALLATION_ID,
+      async () => undefined,
+    )).rejects.toMatchObject({
+      code: "GITHUB_INSTALLATION_TOKEN_UNAVAILABLE",
+      diagnosticCode: "GITHUB_APP_CREDENTIAL_MISMATCH",
+      status: 401,
+    });
+  });
 });
 
 describe("GitHub setup preview", () => {
@@ -410,15 +431,26 @@ describe("GitHub setup preview", () => {
   });
 
   it.each([
-    [401, "unauthorized"],
-    [403, "forbidden"],
-    [429, "rate limited"],
-  ] as const)("treats HTTP %s file lookup as an inspection failure", async (status, message) => {
+    [401, "unauthorized", "GITHUB_APP_CREDENTIAL_MISMATCH"],
+    [403, "forbidden", "GITHUB_REPOSITORY_READ_FORBIDDEN"],
+    [429, "rate limited", "GITHUB_CONTENT_READ_FAILED"],
+  ] as const)("classifies HTTP %s file lookup failures safely", async (status, message, diagnosticCode) => {
     const { service, transport } = makeSetupService();
     transport.files.set("limen.yml", Object.assign(new Error(message), { status }));
 
     await expect(service.inspectSetup(REPOSITORY)).rejects.toMatchObject({
       code: "SETUP_INSPECTION_FAILED",
+      diagnosticCode,
+    });
+  });
+
+  it("classifies a missing default branch repository separately from content reads", async () => {
+    const { service, transport } = makeSetupService();
+    transport.defaultBranchError = Object.assign(new Error("repository missing"), { status: 404 });
+
+    await expect(service.inspectSetup({ ...REPOSITORY, defaultBranch: null })).rejects.toMatchObject({
+      code: "SETUP_INSPECTION_FAILED",
+      diagnosticCode: "GITHUB_REPOSITORY_NOT_FOUND",
     });
   });
 

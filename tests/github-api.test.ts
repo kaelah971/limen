@@ -20,6 +20,10 @@ import {
 import { handleGitHubRepositoryRequest } from "../apps/api/src/github-app-routes";
 import { createLedgerServer } from "../apps/api/src/server";
 import {
+  createObservabilityLogger,
+  type LimenObservabilityLogger,
+} from "../packages/core/src";
+import {
   createGitHubInstallationClient,
   createSetupService,
   type GitHubSetupTransport,
@@ -1169,6 +1173,7 @@ async function startRepositoryServer(
   store: FakeRepositoryStore,
   client: UserAuthClient,
   setupService: ReturnType<typeof makeRepositorySetupService>,
+  observability?: LimenObservabilityLogger,
 ): Promise<string> {
   const server = createLedgerServer({
     ledger: {
@@ -1182,6 +1187,7 @@ async function startRepositoryServer(
       setupService,
       setupConfig: SETUP_CONFIG,
     },
+    ...(observability === undefined ? {} : { observability }),
   } as never);
   repositoryServers.push(server);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
@@ -1650,6 +1656,36 @@ describe("authenticated repository APIs", () => {
     expect(response.status).toBe(502);
     expect(body.code).toBe("SETUP_PR_FAILED");
     expect(store.repositories.get(301)?.lifecycleState).toBe("SETUP_REQUIRED");
+  });
+
+  it("logs the internal GitHub diagnostic without exposing it in the browser response", async () => {
+    const store = new FakeRepositoryStore();
+    addRepositoryFixtures(store);
+    const transport = new FakeRepositoryGitHubTransport();
+    transport.files.set(
+      "limen.yml",
+      Object.assign(new Error(`forbidden ${INSTALLATION_TOKEN}`), { status: 403 }),
+    );
+    const lines: string[] = [];
+    const write = (line: string) => { lines.push(line); };
+    const url = await startRepositoryServer(
+      store,
+      authClient({ user: githubAuthUser(), error: null }),
+      makeRepositorySetupService(store, transport),
+      createObservabilityLogger({ info: write, warning: write, error: write }),
+    );
+
+    const response = await repositoryRequest(
+      url,
+      "/v1/github/repositories/301/setup-preview",
+    );
+    const body = JSON.stringify(await response.json());
+
+    expect(response.status).toBe(502);
+    expect(body).toContain("SETUP_PR_FAILED");
+    expect(body).not.toContain("GITHUB_REPOSITORY_READ_FORBIDDEN");
+    expect(lines.some((line) => line.includes('"errorCode":"GITHUB_REPOSITORY_READ_FORBIDDEN"'))).toBe(true);
+    expect(lines.join("\n")).not.toContain(INSTALLATION_TOKEN);
   });
 
   it("rejects setup actions for disconnected installations before token minting", async () => {

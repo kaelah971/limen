@@ -4,6 +4,7 @@ import {
   type GitHubInstallationApi,
   type GitHubInstallationClientFactory,
   type GitHubPullRequestResponse,
+  type GitHubSetupDiagnosticCode,
 } from "./client";
 
 const ACTION_SHA_PATTERN = /^[0-9a-f]{40}$/i;
@@ -89,11 +90,13 @@ export type SetupPullRequestResult =
 
 export class SetupError extends Error {
   readonly code: string;
+  readonly diagnosticCode: GitHubSetupDiagnosticCode | undefined;
 
-  constructor(code: string, message: string) {
+  constructor(code: string, message: string, diagnosticCode?: GitHubSetupDiagnosticCode) {
     super(message);
     this.name = "SetupError";
     this.code = code;
+    this.diagnosticCode = diagnosticCode;
   }
 }
 
@@ -105,15 +108,23 @@ export class SetupConfigError extends SetupError {
 }
 
 export class SetupInspectionError extends SetupError {
-  constructor() {
-    super("SETUP_INSPECTION_FAILED", "The repository setup state could not be inspected.");
+  constructor(diagnosticCode?: GitHubSetupDiagnosticCode) {
+    super(
+      "SETUP_INSPECTION_FAILED",
+      "The repository setup state could not be inspected.",
+      diagnosticCode,
+    );
     this.name = "SetupInspectionError";
   }
 }
 
 export class SetupGitHubError extends SetupError {
-  constructor() {
-    super("SETUP_GITHUB_ERROR", "The setup pull request could not be created on GitHub.");
+  constructor(diagnosticCode?: GitHubSetupDiagnosticCode) {
+    super(
+      "SETUP_GITHUB_ERROR",
+      "The setup pull request could not be created on GitHub.",
+      diagnosticCode,
+    );
     this.name = "SetupGitHubError";
   }
 }
@@ -219,17 +230,27 @@ async function fileExists(
       ref: defaultBranch,
     });
     if (result.type !== "file" || result.path !== path) {
-      throw new SetupInspectionError();
+      throw new GitHubInstallationClientError(
+        "GITHUB_INSTALLATION_RESPONSE_INVALID",
+        "The GitHub installation returned an invalid response.",
+        undefined,
+        "GITHUB_CONTENT_RESPONSE_INVALID",
+      );
     }
     return true;
   } catch (error) {
     if (error instanceof GitHubInstallationClientError && error.status === 404) {
       return false;
     }
-    if (error instanceof SetupInspectionError) {
+    if (error instanceof GitHubInstallationClientError) {
       throw error;
     }
-    throw new SetupInspectionError();
+    throw new GitHubInstallationClientError(
+      "GITHUB_INSTALLATION_REQUEST_FAILED",
+      "The GitHub installation request failed.",
+      undefined,
+      "GITHUB_CONTENT_READ_FAILED",
+    );
   }
 }
 
@@ -292,7 +313,7 @@ export async function inspectSetup(
         error.code !== "GITHUB_INSTALLATION_RESPONSE_INVALID") {
         throw error;
       }
-      throw new SetupInspectionError();
+      throw new SetupInspectionError(error.diagnosticCode);
     }
     if (error instanceof SetupError) {
       throw error;
@@ -390,7 +411,9 @@ export async function createSetupPullRequest(
     if (error instanceof GitHubInstallationClientError && error.code === "GITHUB_INSTALLATION_DISCONNECTED") {
       throw error;
     }
-    throw new SetupGitHubError();
+    throw new SetupGitHubError(error instanceof GitHubInstallationClientError || error instanceof SetupError
+      ? error.diagnosticCode
+      : undefined);
   }
 
   if (operation.pullRequest === undefined || operation.branchName === undefined) {

@@ -84,6 +84,7 @@ export type {
   GitHubPullRequestResponse,
   GitHubRepositoryFileInput,
   GitHubRepositoryFileResponse,
+  GitHubSetupDiagnosticCode,
   GitHubSetupTransport,
   InstallationConnectionState,
 } from "./client";

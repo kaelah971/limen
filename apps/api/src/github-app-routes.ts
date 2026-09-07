@@ -35,6 +35,7 @@ import type {
 } from "./github-app-store";
 import type { GitHubActionsOidcVerifier } from "../../../packages/github-app/src";
 import type {
+  GitHubSetupDiagnosticCode,
   SetupGenerationConfig,
   SetupRepository,
   SetupService,
@@ -81,6 +82,7 @@ export interface GitHubRepositoryRouteOptions {
 export interface GitHubRepositoryHttpResponse {
   status: number;
   body: Record<string, unknown>;
+  diagnosticCode?: GitHubSetupDiagnosticCode;
 }
 
 export interface GitHubEvaluationRouteOptions {
@@ -187,6 +189,18 @@ function repositoryNotFound(): GitHubRepositoryRequestError {
     "GITHUB_REPOSITORY_NOT_FOUND",
     "The GitHub repository was not found.",
   );
+}
+
+function repositoryResponse(
+  status: number,
+  body: Record<string, unknown>,
+  diagnosticCode?: GitHubSetupDiagnosticCode,
+): GitHubRepositoryHttpResponse {
+  return {
+    status,
+    body,
+    ...(diagnosticCode === undefined ? {} : { diagnosticCode }),
+  };
 }
 
 function sanitizedRepository(repository: GitHubRepositoryRecord): Record<string, unknown> {
@@ -550,88 +564,93 @@ export async function handleGitHubInstallationBind(
 }
 
 function repositoryErrorResponse(error: unknown): GitHubRepositoryHttpResponse {
+  const diagnosticCode = error instanceof SetupError
+    ? error.diagnosticCode
+    : error instanceof GitHubInstallationClientError
+      ? error.diagnosticCode
+      : undefined;
   if (error instanceof GitHubRepositoryRequestError || error instanceof UserAuthError) {
-    return response(error.status, { code: error.code, message: error.message });
+    return repositoryResponse(error.status, { code: error.code, message: error.message });
   }
   if (error instanceof GitHubInstallationNotConfirmedError) {
-    return response(409, { code: error.code, message: error.message });
+    return repositoryResponse(409, { code: error.code, message: error.message });
   }
   if (error instanceof GitHubInstallationDisconnectedError) {
-    return response(409, { code: error.code, message: error.message });
+    return repositoryResponse(409, { code: error.code, message: error.message });
   }
   if (error instanceof GitHubSetupPersistenceError) {
     if (error.code === "GITHUB_REPOSITORY_NOT_FOUND") {
-      return response(404, { code: error.code, message: error.message });
+      return repositoryResponse(404, { code: error.code, message: error.message });
     }
     if (error.code === "GITHUB_REPOSITORY_DISCONNECTED") {
-      return response(409, {
+      return repositoryResponse(409, {
         code: "INSTALLATION_DISCONNECTED",
         message: "The GitHub installation is disconnected.",
       });
     }
     if (error.code === "GITHUB_SETUP_PR_ALREADY_OPEN") {
-      return response(409, { code: error.code, message: error.message });
+      return repositoryResponse(409, { code: error.code, message: error.message });
     }
     if (error.code === "GITHUB_SETUP_INPUT_INVALID") {
-      return response(400, {
+      return repositoryResponse(400, {
         code: "CONFIGURATION_INVALID",
         message: "The repository setup configuration is invalid.",
       });
     }
-    return response(500, {
+    return repositoryResponse(500, {
       code: "SETUP_PR_FAILED",
       message: "The setup pull request could not be recorded.",
     });
   }
   if (error instanceof SetupInspectionError) {
-    return response(502, {
+    return repositoryResponse(502, {
       code: "SETUP_PR_FAILED",
       message: "The repository setup could not be inspected.",
-    });
+    }, diagnosticCode);
   }
   if (error instanceof SetupGitHubError) {
-    return response(502, {
+    return repositoryResponse(502, {
       code: "SETUP_PR_FAILED",
       message: "The setup pull request could not be created on GitHub.",
-    });
+    }, diagnosticCode);
   }
   if (error instanceof SetupPersistenceError) {
-    return response(500, {
+    return repositoryResponse(500, {
       code: "SETUP_PR_FAILED",
       message: "The setup pull request could not be recorded.",
     });
   }
   if (error instanceof SetupConfigError) {
-    return response(500, {
+    return repositoryResponse(500, {
       code: "CONFIGURATION_INVALID",
       message: "The setup generation configuration is invalid.",
     });
   }
   if (error instanceof GitHubInstallationClientError) {
     if (error.code === "GITHUB_INSTALLATION_DISCONNECTED") {
-      return response(409, {
+      return repositoryResponse(409, {
         code: "INSTALLATION_DISCONNECTED",
         message: "The GitHub installation is disconnected.",
       });
     }
-    return response(502, {
+    return repositoryResponse(502, {
       code: "SETUP_PR_FAILED",
       message: "The setup pull request could not be created on GitHub.",
-    });
+    }, diagnosticCode);
   }
   if (error instanceof SetupError) {
-    return response(502, {
+    return repositoryResponse(502, {
       code: "SETUP_PR_FAILED",
       message: "The GitHub repository setup request failed.",
-    });
+    }, diagnosticCode);
   }
   if (error instanceof GitHubAppStoreError) {
-    return response(500, {
+    return repositoryResponse(500, {
       code: "SETUP_PR_FAILED",
       message: "The GitHub repository setup request could not be completed.",
     });
   }
-  return response(500, {
+  return repositoryResponse(500, {
     code: "GITHUB_REPOSITORY_API_INTERNAL_ERROR",
     message: "The GitHub repository request failed.",
   });

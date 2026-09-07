@@ -2,6 +2,23 @@ const FULL_SHA_PATTERN = /^[0-9a-f]{40}$/i;
 
 export type InstallationConnectionState = "ACTIVE" | "DISCONNECTED";
 
+export type GitHubSetupDiagnosticCode =
+  | "GITHUB_APP_CREDENTIAL_MISMATCH"
+  | "GITHUB_INSTALLATION_INVALID"
+  | "GITHUB_INSTALLATION_STATE_UNAVAILABLE"
+  | "GITHUB_INSTALLATION_DISCONNECTED"
+  | "GITHUB_INSTALLATION_TOKEN_UNAVAILABLE"
+  | "GITHUB_INSTALLATION_REQUEST_FAILED"
+  | "GITHUB_INSTALLATION_RESPONSE_INVALID"
+  | "GITHUB_REPOSITORY_NOT_FOUND"
+  | "GITHUB_REPOSITORY_READ_FORBIDDEN"
+  | "GITHUB_REPOSITORY_WRITE_FORBIDDEN"
+  | "GITHUB_DEFAULT_BRANCH_UNAVAILABLE"
+  | "GITHUB_CONTENT_READ_FAILED"
+  | "GITHUB_CONTENT_RESPONSE_INVALID"
+  | "GITHUB_REPOSITORY_WRITE_FAILED"
+  | "GITHUB_PULL_REQUEST_RESPONSE_INVALID";
+
 export interface GitHubRepositoryFileInput {
   owner: string;
   repo: string;
@@ -102,12 +119,19 @@ export interface GitHubInstallationClientFactory {
 export class GitHubInstallationClientError extends Error {
   readonly code: string;
   readonly status: number | undefined;
+  readonly diagnosticCode: GitHubSetupDiagnosticCode | undefined;
 
-  constructor(code: string, message: string, status?: number) {
+  constructor(
+    code: string,
+    message: string,
+    status?: number,
+    diagnosticCode?: GitHubSetupDiagnosticCode,
+  ) {
     super(message);
     this.name = "GitHubInstallationClientError";
     this.code = code;
     this.status = status;
+    this.diagnosticCode = diagnosticCode;
   }
 }
 
@@ -123,19 +147,67 @@ function transportStatus(error: unknown): number | undefined {
   return undefined;
 }
 
-function transportFailure(error: unknown): GitHubInstallationClientError {
+type GitHubTransportOperation =
+  | "repository-file"
+  | "default-branch"
+  | "create-branch"
+  | "create-file"
+  | "create-pull-request";
+
+function transportDiagnosticCode(
+  operation: GitHubTransportOperation,
+  status: number | undefined,
+): GitHubSetupDiagnosticCode {
+  if (status === 401) {
+    return "GITHUB_APP_CREDENTIAL_MISMATCH";
+  }
+  if (status === 403) {
+    return operation === "repository-file" || operation === "default-branch"
+      ? "GITHUB_REPOSITORY_READ_FORBIDDEN"
+      : "GITHUB_REPOSITORY_WRITE_FORBIDDEN";
+  }
+  if (status === 404 && operation !== "repository-file") {
+    return "GITHUB_REPOSITORY_NOT_FOUND";
+  }
+  if (operation === "repository-file") {
+    return "GITHUB_CONTENT_READ_FAILED";
+  }
+  if (operation === "default-branch") {
+    return "GITHUB_DEFAULT_BRANCH_UNAVAILABLE";
+  }
+  if (operation === "create-pull-request") {
+    return "GITHUB_REPOSITORY_WRITE_FAILED";
+  }
+  return "GITHUB_REPOSITORY_WRITE_FAILED";
+}
+
+function tokenDiagnosticCode(status: number | undefined): GitHubSetupDiagnosticCode {
+  return status === 401 || status === 403
+    ? "GITHUB_APP_CREDENTIAL_MISMATCH"
+    : "GITHUB_INSTALLATION_TOKEN_UNAVAILABLE";
+}
+
+function transportFailure(
+  error: unknown,
+  operation: GitHubTransportOperation,
+): GitHubInstallationClientError {
   const status = transportStatus(error);
   return new GitHubInstallationClientError(
     "GITHUB_INSTALLATION_REQUEST_FAILED",
     "The GitHub installation request failed.",
     status,
+    transportDiagnosticCode(operation, status),
   );
 }
 
-function responseFailure(): GitHubInstallationClientError {
+function responseFailure(
+  diagnosticCode: GitHubSetupDiagnosticCode = "GITHUB_INSTALLATION_RESPONSE_INVALID",
+): GitHubInstallationClientError {
   return new GitHubInstallationClientError(
     "GITHUB_INSTALLATION_RESPONSE_INVALID",
     "The GitHub installation returned an invalid response.",
+    undefined,
+    diagnosticCode,
   );
 }
 
@@ -148,6 +220,8 @@ function scopedToken(tokenScope: { value: string; active: boolean }): string {
     throw new GitHubInstallationClientError(
       "GITHUB_INSTALLATION_REQUEST_FAILED",
       "The GitHub installation request failed.",
+      undefined,
+      "GITHUB_INSTALLATION_REQUEST_FAILED",
     );
   }
   return tokenScope.value;
@@ -163,10 +237,10 @@ function bindTransport(
       try {
         result = await transport.getRepositoryFile(input, scopedToken(tokenScope));
       } catch (error) {
-        throw transportFailure(error);
+        throw transportFailure(error, "repository-file");
       }
       if (!isRecord(result) || result.type !== "file" || typeof result.path !== "string") {
-        throw responseFailure();
+        throw responseFailure("GITHUB_CONTENT_RESPONSE_INVALID");
       }
       return { type: "file", path: result.path };
     },
@@ -175,7 +249,7 @@ function bindTransport(
       try {
         result = await transport.getDefaultBranch(input, scopedToken(tokenScope));
       } catch (error) {
-        throw transportFailure(error);
+        throw transportFailure(error, "default-branch");
       }
       if (
         !isRecord(result) ||
@@ -184,7 +258,7 @@ function bindTransport(
         typeof result.headSha !== "string" ||
         !FULL_SHA_PATTERN.test(result.headSha)
       ) {
-        throw responseFailure();
+        throw responseFailure("GITHUB_DEFAULT_BRANCH_UNAVAILABLE");
       }
       return {
         branchName: result.branchName,
@@ -195,14 +269,14 @@ function bindTransport(
       try {
         await transport.createBranch(input, scopedToken(tokenScope));
       } catch (error) {
-        throw transportFailure(error);
+        throw transportFailure(error, "create-branch");
       }
     },
     async createFile(input) {
       try {
         await transport.createFile(input, scopedToken(tokenScope));
       } catch (error) {
-        throw transportFailure(error);
+        throw transportFailure(error, "create-file");
       }
     },
     async createPullRequest(input) {
@@ -210,7 +284,7 @@ function bindTransport(
       try {
         result = await transport.createPullRequest(input, scopedToken(tokenScope));
       } catch (error) {
-        throw transportFailure(error);
+        throw transportFailure(error, "create-pull-request");
       }
       if (
         !isRecord(result) ||
@@ -220,7 +294,7 @@ function bindTransport(
         typeof result.url !== "string" ||
         !result.url.startsWith("https://")
       ) {
-        throw responseFailure();
+        throw responseFailure("GITHUB_PULL_REQUEST_RESPONSE_INVALID");
       }
       return { number: result.number, url: result.url };
     },
@@ -236,6 +310,8 @@ export async function withInstallationClient<T>(
     throw new GitHubInstallationClientError(
       "GITHUB_INSTALLATION_INVALID",
       "The GitHub installation ID is invalid.",
+      undefined,
+      "GITHUB_INSTALLATION_INVALID",
     );
   }
 
@@ -248,27 +324,36 @@ export async function withInstallationClient<T>(
       throw new GitHubInstallationClientError(
         "GITHUB_INSTALLATION_STATE_UNAVAILABLE",
         "The GitHub installation state is unavailable.",
+        undefined,
+        "GITHUB_INSTALLATION_STATE_UNAVAILABLE",
       );
     }
     if (state !== "ACTIVE") {
       throw new GitHubInstallationClientError(
         "GITHUB_INSTALLATION_DISCONNECTED",
         "The GitHub installation is disconnected.",
+        undefined,
+        "GITHUB_INSTALLATION_DISCONNECTED",
       );
     }
 
     try {
       tokenScope.value = await dependencies.mintInstallationToken(installationId);
-    } catch {
+    } catch (error) {
+      const status = transportStatus(error);
       throw new GitHubInstallationClientError(
         "GITHUB_INSTALLATION_TOKEN_UNAVAILABLE",
         "A GitHub installation token could not be created.",
+        status,
+        tokenDiagnosticCode(status),
       );
     }
     if (typeof tokenScope.value !== "string" || tokenScope.value.trim() === "") {
       throw new GitHubInstallationClientError(
         "GITHUB_INSTALLATION_TOKEN_UNAVAILABLE",
         "A GitHub installation token could not be created.",
+        undefined,
+        "GITHUB_INSTALLATION_TOKEN_UNAVAILABLE",
       );
     }
 
@@ -282,6 +367,8 @@ export async function withInstallationClient<T>(
       throw new GitHubInstallationClientError(
         "GITHUB_INSTALLATION_REQUEST_FAILED",
         "The GitHub installation request failed.",
+        undefined,
+        "GITHUB_INSTALLATION_REQUEST_FAILED",
       );
     }
   } finally {
