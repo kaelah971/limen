@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { loadGitHubAppDeploymentConfig } from "../apps/api/src/config";
 import {
   GitHubAppStateError,
@@ -50,6 +50,32 @@ function thrownMessage(action: () => void): string {
   }
 
   throw new Error("Expected action to throw.");
+}
+
+async function loadContentSecurityPolicy(
+  overrides: Record<string, string>,
+): Promise<string> {
+  const previousValues = new Map(
+    Object.keys(overrides).map((key) => [key, process.env[key]]),
+  );
+  Object.assign(process.env, overrides);
+  vi.resetModules();
+
+  try {
+    const { default: nextConfig } = await import("../next.config");
+    const headers = await nextConfig.headers?.();
+    return headers?.[0]?.headers.find((header) => header.key === "Content-Security-Policy")
+      ?.value ?? "";
+  } finally {
+    for (const [key, value] of previousValues) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+    vi.resetModules();
+  }
 }
 
 describe("GitHub App repository lifecycle domain", () => {
@@ -195,11 +221,30 @@ describe("GitHub App deployment configuration", () => {
     expect(environmentExample).not.toContain("NEXT_PUBLIC_LIMEN_API_URL");
   });
 
-  it("allows the configured Supabase origin for browser auth connections", async () => {
-    const nextConfig = await readFile("next.config.ts", "utf8");
+  it("allows only configured Supabase and public API origins for browser connections", async () => {
+    const contentSecurityPolicy = await loadContentSecurityPolicy({
+      NODE_ENV: "production",
+      NEXT_PUBLIC_SUPABASE_URL: "https://supabase.example/auth/v1/settings?source=fixture",
+      LIMEN_PUBLIC_API_URL: "https://api.example/v1/github/installations?source=fixture#bind",
+    });
 
-    expect(nextConfig).toContain("NEXT_PUBLIC_SUPABASE_URL");
-    expect(nextConfig).toContain("supabaseOrigin");
-    expect(nextConfig).toContain("connect-src 'self' ${supabaseOrigin}");
+    expect(contentSecurityPolicy).toContain(
+      "connect-src 'self' https://supabase.example https://api.example",
+    );
+    expect(contentSecurityPolicy).not.toContain("/auth/v1/settings");
+    expect(contentSecurityPolicy).not.toContain("/v1/github/installations");
+    expect(contentSecurityPolicy).not.toContain("?source=fixture");
+    expect(contentSecurityPolicy).not.toContain("#bind");
+  });
+
+  it("does not allow remote HTTP API origins in production CSP", async () => {
+    const contentSecurityPolicy = await loadContentSecurityPolicy({
+      NODE_ENV: "production",
+      NEXT_PUBLIC_SUPABASE_URL: "https://supabase.example",
+      LIMEN_PUBLIC_API_URL: "http://api.example/v1",
+    });
+
+    expect(contentSecurityPolicy).toContain("connect-src 'self' https://supabase.example");
+    expect(contentSecurityPolicy).not.toContain("http://api.example");
   });
 });

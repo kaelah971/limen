@@ -455,7 +455,7 @@ describe("P7 route and accessibility boundaries", () => {
     expect(config).toContain("nosniff");
     expect(config).toContain("strict-origin-when-cross-origin");
     expect(config).toContain("frame-ancestors 'none'");
-    expect(config).toContain("connect-src 'self'");
+    expect(config).toContain("connect-src ${connectSources}");
   });
 
   it("defines the responsive evidence path and reduced-motion behavior", async () => {
