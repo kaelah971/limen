@@ -328,8 +328,9 @@ describe("P7 route and accessibility boundaries", () => {
   });
 
   it("keeps navigation targets and external link semantics explicit", async () => {
-    const [home, brand, demo, demoTrace, receipt, evidence] = await Promise.all([
+    const [home, homeStyles, brand, demo, demoTrace, receipt, evidence] = await Promise.all([
       readFile("app/page.tsx", "utf8"),
+      readFile("app/globals.css", "utf8"),
       readFile("app/components/brand.tsx", "utf8"),
       readFile("app/demo/page.tsx", "utf8"),
       readFile("app/components/demo-trace.tsx", "utf8"),
@@ -341,6 +342,10 @@ describe("P7 route and accessibility boundaries", () => {
     expect(home).toContain("GitHub-native release control");
     expect(home).toContain("EVIDENCE DECIDES.");
     expect(home).toContain("FIXES GET VERIFIED.");
+    expect(home).toContain('data-glitch-copy="FIXES GET VERIFIED."');
+    expect(home).not.toContain("THE THRESHOLD.");
+    expect(homeStyles).toContain("content: attr(data-glitch-copy);");
+    expect(homeStyles).not.toContain("THE THRESHOLD.");
     expect(home).toContain("Limen combines repository context, independent security evidence, and deterministic policy to decide whether code should ship — then keeps blocked releases on a path toward verified remediation.");
     expect(home).toContain("PASS, HOLD, or REVIEW is the decision. Verified remediation is the loop that closes it.");
     expect(home).toContain("Deterministic Policy");

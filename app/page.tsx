@@ -30,7 +30,7 @@ export default function Home() {
             <p className="eyebrow">GitHub-native release control</p>
             <h1>
               <span>EVIDENCE DECIDES.</span>
-              <span className="threshold-line">FIXES GET VERIFIED.</span>
+              <span className="threshold-line" data-glitch-copy="FIXES GET VERIFIED.">FIXES GET VERIFIED.</span>
             </h1>
             <p className="hero-copy">
               Limen combines repository context, independent security evidence, and deterministic policy to decide whether code should ship — then keeps blocked releases on a path toward verified remediation.

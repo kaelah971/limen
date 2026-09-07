@@ -454,7 +454,7 @@ code,
 
 .threshold-line::before,
 .threshold-line::after {
-  content: "THE THRESHOLD.";
+  content: attr(data-glitch-copy);
   position: absolute;
   inset: 0;
   pointer-events: none;

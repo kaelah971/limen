@@ -146,6 +146,24 @@ The [Limen onboarding demo repository](https://github.com/kaelah971/limen-onboar
 
 Current onboarding limitation: the `LIMEN_TELEGRAPH_PRIVATE_KEY` repository Secret and `TELEGRAPH_ENGINE_URL` repository Variable still require manual GitHub Settings configuration. Reducing that work is upcoming onboarding polish, not finished automation.
 
+## Post-submission updates
+
+The original Telegraph Track 3 submission remains preserved and frozen at immutable tag `telegraph-track3-submission-2026-09-05`, pointing to submitted commit `6a763acf0f58c03f42b0d121103640691ff96825`. This is the P17 submission snapshot.
+
+Limen development continued after that snapshot. These updates are documented separately so reviewers can see the product's ongoing evolution without confusing post-submission work with the original submitted artifact.
+
+The latest major update adds real GitHub App onboarding:
+`install -> authorize repository -> inspect setup -> review setup PR -> merge -> CONFIGURED`.
+
+This is post-submission V2/P18 work. The broader direction is verified remediation:
+`PASS` / `HOLD` / `REVIEW` decisions -> remediation -> re-evaluation -> verified fix.
+
+Latest product update thread:
+https://x.com/_limenn_/status/2097105514656100735?s=46
+
+Live product:
+https://limen-mu.vercel.app
+
 ## Try It
 
 - [Live product](https://limen-mu.vercel.app)
