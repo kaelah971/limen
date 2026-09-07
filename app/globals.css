@@ -109,6 +109,10 @@ input:focus-visible {
   background: #bdbdbd;
 }
 
+.page-frame:has(.hero) {
+  background: #ffffff;
+}
+
 .site-header {
   position: relative;
   z-index: 10;
