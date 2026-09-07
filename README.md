@@ -6,7 +6,13 @@
 
 # Limen
 
-Limen is a release evidence gate that combines repository-specific GitHub dependency facts, independently routed Telegraph CVE evidence, and deterministic repository policy to return `PASS`, `HOLD`, or `REVIEW` before a release proceeds.
+Limen is a GitHub-native release evidence and verified remediation layer. It combines repository-specific dependency and exposure evidence from GitHub and Dependabot, independent routed CVE evidence from Telegraph, and deterministic repository policy from `limen.yml` to return `PASS`, `HOLD`, or `REVIEW` before a release proceeds.
+
+`PASS`, `HOLD`, and `REVIEW` remain deterministic. Telegraph supplies evidence; it does not certify safety or exploitability. Missing, conflicting, or unavailable evidence must never silently become `PASS`.
+
+> **PASS, HOLD, or REVIEW is the decision. Verified remediation is the loop that closes it.**
+
+Product loop: `Install -> Evidence -> Decision -> Remediation -> Re-evaluation -> Verified`
 
 ## Start Here
 
@@ -119,9 +125,26 @@ Limen currently supports:
 - Deterministic `PASS`, `HOLD`, and `REVIEW` decisions from trusted-base policy and repository-specific evidence.
 - A validated Telegraph testnet evidence path on Base Sepolia using the official x402 EVM payment flow.
 - Optional server-owned persistence and sanitized public receipt inspection.
+- Live production GitHub App onboarding with OAuth/session handling, explicit repository authorization, repository inspection, safe setup preview, and reviewable setup PRs.
+- Setup PR merge handling that transitions `SETUP_PR_OPEN` to `CONFIGURED`; the repository becomes `VERIFIED` only after the first accepted real evaluation.
 - Public setup, demo, proof, and architecture surfaces for inspection.
 
-The verified package contains two distinct evidence types: fresh P14 Judge Mode Action runs and historical hosted receipt evidence. They are not the same run. Limen does not claim external production adoption or human-user validation.
+The verified package contains two distinct evidence types: fresh P14 Judge Mode Action runs and historical hosted receipt evidence. They are not the same run. The live onboarding flow is production proof of the Limen integration path, not a claim of broad external production adoption.
+
+## Live V2 Onboarding
+
+GitHub App onboarding is live in production and currently supports:
+
+- GitHub OAuth and session-backed access.
+- GitHub App installation and explicit repository authorization.
+- Repository inspection and a safe, read-only setup preview.
+- Reviewable setup PR creation; existing repository files are never overwritten.
+- A merge webhook that moves `SETUP_PR_OPEN` to `CONFIGURED`.
+- `VERIFIED` only after the first accepted real Limen evaluation.
+
+The [Limen onboarding demo repository](https://github.com/kaelah971/limen-onboarding-demo) has completed setup PR #1 and is proven through `CONFIGURED`. It is not claimed to be `VERIFIED`.
+
+Current onboarding limitation: the `LIMEN_TELEGRAPH_PRIVATE_KEY` repository Secret and `TELEGRAPH_ENGINE_URL` repository Variable still require manual GitHub Settings configuration. Reducing that work is upcoming onboarding polish, not finished automation.
 
 ## Try It
 
@@ -168,7 +191,9 @@ The current Telegraph Engine URL is an explicit HTTP testnet exception documente
 ## Limitations
 
 - Current Telegraph execution is controlled testnet validation on Base Sepolia.
-- Current evidence is controlled/demo evidence, not production adoption.
+- The live V2 onboarding path is production-backed; the onboarding demo repository is proven through `CONFIGURED`, not `VERIFIED`.
+- Telegraph repository Secret and Variable configuration is still manual.
+- Current Judge Mode and receipt records remain controlled evidence, not a claim of universal safety or broad production adoption.
 - External maintainer testing remains pending.
 - The shared ledger token model is single-operator, not multi-tenant authorization.
 - P14 Judge Mode runs were not automatically persisted to receipt infrastructure.
@@ -176,60 +201,49 @@ The current Telegraph Engine URL is an explicit HTTP testnet exception documente
 - The current Telegraph HTTP Engine endpoint is an explicit testnet exception.
 - `PASS` does not mean universal repository security.
 
-## Post-Hackathon Roadmap
+## Development Status / What's Next
 
-The following capabilities are future product work. They are not part of the current Limen implementation or evidence package.
+Limen is actively developed, and new milestones will continue shipping publicly. This README and the roadmap will be updated as capabilities land. The original deterministic release gate remains the core; the destination is verified remediation, not an AI safety oracle.
 
-### 1. GitHub App onboarding
+## Roadmap From Here
 
-- Install Limen directly into repositories.
-- Provide guided configuration and installation health checks.
-- Manage Limen across multiple repositories from one installation.
+The product is expanding from **Should this release ship?** toward **What needs to change, can Limen prepare the fix, and did the fix actually clear the evidence?**
 
-### 2. First-class GitHub release checks
+### P18.1 - Onboarding polish
 
-- Publish GitHub Check Runs for each evaluation.
-- Show `PASS`, `HOLD`, or `REVIEW` directly in pull requests with evidence summaries.
-- Support branch-protection integration without changing deterministic decision semantics.
+Reduce or remove the manual GitHub Settings work required for Telegraph configuration.
 
-### 3. Broader repository evidence
+### P19 - Remediation recommendations
 
-- Incorporate SBOMs, provenance, signatures, scanners, release artifacts, and CI/test evidence.
-- Preserve repository-specific context and source provenance for each evidence type.
+Provide concrete, repository-aware changes for `HOLD` and `REVIEW` findings.
 
-### 4. Evidence-provider expansion
+### P20 - One-click remediation PRs
 
-- Add additional independent evidence providers.
-- Preserve source separation rather than collapsing providers into one unqualified score.
-- Continue resolving material conflicts to `REVIEW` where appropriate.
+Create reviewable GitHub fix PRs without bypassing repository review.
 
-### 5. Remediation assistance
+### P21 - Automatic re-evaluation
 
-- Provide upgrade guidance, patched ranges, and policy-aware remediation suggestions.
-- Keep generated remediation separate from deterministic release decisions.
+Re-run Limen after remediation and verify whether the blocking evidence cleared.
 
-### 6. Persistent team workspace
+### P22 - Evidence and remediation history UI
 
-- Provide repository and decision history, evidence search, receipts, and audit trails.
-- Add team and organization boundaries for shared operation.
+Show decisions, evidence, remediation attempts, policy versions, and verification state together.
 
-### 7. Policy management
+### P23 - AI-assisted remediation
 
-- Offer policy templates and organization defaults.
-- Support repository overrides, policy history, and policy-change review.
+Use AI to assist investigation and remediation planning; the deterministic engine retains release authority.
 
-### 8. Agent and automation interfaces
+### P24 - Policy-driven auto-remediation
 
-- Let agents and automation consume deterministic Limen decisions and evidence summaries.
-- Prevent agents from silently redefining repository policy or release thresholds.
+Let repository policy control which fixes Limen may prepare automatically.
 
-### 9. Production infrastructure
+### P25 - Teams and production hardening
 
-- Move from the validated HTTP testnet route to an approved HTTPS Telegraph production route.
-- Establish production payment handling, multi-tenant isolation, and secret lifecycle controls.
-- Add monitoring, reconciliation, and explicit reliability targets.
+Add organization workflows, permissions, reliability, onboarding, usage, and billing foundations.
 
-Long term, Limen becomes a release evidence control plane sitting between CI, security, and evidence signals and the decision to release.
+### P26 - Broader evidence
+
+Add evidence sources while preserving provenance, freshness, conflict semantics, and fail-safe behavior.
 
 ## Verification
 
