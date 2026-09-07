@@ -115,7 +115,7 @@ export function createGitHubAppInstallationClient(
   });
 
   return createGitHubInstallationClient({
-    getInstallationState: dependencies.getInstallationState,
+    getInstallationState: (installationId) => dependencies.getInstallationState(installationId),
     mintInstallationToken: async (installationId) => {
       const authentication = await auth({
         type: "installation",

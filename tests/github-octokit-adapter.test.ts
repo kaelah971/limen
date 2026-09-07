@@ -168,6 +168,37 @@ describe("GitHub App Octokit adapter", () => {
     });
   });
 
+  it("preserves the receiver when checking installation state", async () => {
+    const auth = vi.fn().mockResolvedValue({ token: "installation-token-fixture" });
+    const fakeOctokit = createFakeOctokitConstructor();
+    const stateStore = {
+      connectionState: "ACTIVE" as const,
+      getInstallationState(installationId: number): Promise<"ACTIVE" | "DISCONNECTED"> {
+        if (installationId !== 456) {
+          throw new Error("unexpected installation");
+        }
+        return Promise.resolve(this.connectionState);
+      },
+    };
+    const adapter = createGitHubAppInstallationClient(
+      CONFIG,
+      stateStore,
+      {
+        createAppAuth: vi.fn().mockReturnValue(auth),
+        Octokit: fakeOctokit.constructor,
+      },
+    );
+
+    await expect(adapter.withInstallationClient(456, async (client) =>
+      client.getRepositoryFile({
+        owner: "owner",
+        repo: "repo",
+        path: "limen.yml",
+        ref: "main",
+      }),
+    )).resolves.toEqual({ type: "file", path: "limen.yml" });
+  });
+
   it("does not mint a token when the installation is disconnected", async () => {
     const auth = vi.fn();
     const fakeOctokit = createFakeOctokitConstructor();
