@@ -338,6 +338,12 @@ describe("P7 route and accessibility boundaries", () => {
     ]);
     expect(home).toContain('href="/demo"');
     expect(home).toContain('href="/install"');
+    expect(home).toContain("GitHub-native release control");
+    expect(home).toContain("EVIDENCE DECIDES.");
+    expect(home).toContain("FIXES GET VERIFIED.");
+    expect(home).toContain("Limen combines repository context, independent security evidence, and deterministic policy to decide whether code should ship — then keeps blocked releases on a path toward verified remediation.");
+    expect(home).toContain("PASS, HOLD, or REVIEW is the decision. Verified remediation is the loop that closes it.");
+    expect(home).toContain("Deterministic Policy");
     expect(home).toContain("Install Limen");
     expect(home).toContain("Inspect real proof");
     expect(home).toContain("href={`/receipt/${ACTIVE_HOLD_RECEIPT_ID}`}");

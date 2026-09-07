@@ -27,16 +27,16 @@ export default function Home() {
       <main className="page-main">
         <section className="hero">
           <div className="hero-inner">
-            <p className="eyebrow">Release evidence gate</p>
+            <p className="eyebrow">GitHub-native release control</p>
             <h1>
-              <span>LET EVIDENCE SET</span>
-              <span className="threshold-line">THE THRESHOLD.</span>
+              <span>EVIDENCE DECIDES.</span>
+              <span className="threshold-line">FIXES GET VERIFIED.</span>
             </h1>
             <p className="hero-copy">
-              Repository facts + independently routed CVE evidence, evaluated against the policy your release already lives by.
+              Limen combines repository context, independent security evidence, and deterministic policy to decide whether code should ship — then keeps blocked releases on a path toward verified remediation.
             </p>
             <p className="hero-support">
-              Limen turns evidence into a deterministic PASS, HOLD, or REVIEW before code leaves the repository.
+              PASS, HOLD, or REVIEW is the decision. Verified remediation is the loop that closes it.
             </p>
             <div className="hero-actions">
               <Link className="button button-primary" href="/install">
@@ -50,7 +50,7 @@ export default function Home() {
               <span>GitHub</span>
               <span>Dependabot</span>
               <span>Telegraph</span>
-              <span>Base Sepolia</span>
+              <span>Deterministic Policy</span>
             </div>
             <div className="mesh-wrap">
               <EvidenceMesh />
