@@ -194,4 +194,12 @@ describe("GitHub App deployment configuration", () => {
     expect(environmentExample).not.toContain("NEXT_PUBLIC_SUPABASE_ANON_KEY");
     expect(environmentExample).not.toContain("NEXT_PUBLIC_LIMEN_API_URL");
   });
+
+  it("allows the configured Supabase origin for browser auth connections", async () => {
+    const nextConfig = await readFile("next.config.ts", "utf8");
+
+    expect(nextConfig).toContain("NEXT_PUBLIC_SUPABASE_URL");
+    expect(nextConfig).toContain("supabaseOrigin");
+    expect(nextConfig).toContain("connect-src 'self' ${supabaseOrigin}");
+  });
 });

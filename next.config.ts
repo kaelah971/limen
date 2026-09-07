@@ -1,5 +1,20 @@
 import type { NextConfig } from "next";
 
+function getSupabaseOrigin(value: string | undefined): string {
+  const configuredUrl = value?.trim();
+  if (configuredUrl === undefined || configuredUrl === "") {
+    return "";
+  }
+  try {
+    const url = new URL(configuredUrl);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.origin : "";
+  } catch {
+    return "";
+  }
+}
+
+const supabaseOrigin = getSupabaseOrigin(process.env.NEXT_PUBLIC_SUPABASE_URL);
+
 const nextConfig: NextConfig = {
   async headers() {
     return [
@@ -21,7 +36,7 @@ const nextConfig: NextConfig = {
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               "font-src 'self' https://fonts.gstatic.com",
               "img-src 'self' data: blob:",
-              "connect-src 'self'",
+              `connect-src 'self' ${supabaseOrigin}`,
             ].join("; "),
           },
         ],
