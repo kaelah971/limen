@@ -50,6 +50,7 @@ const GITHUB_DEPLOYMENT_CONFIG = {
   supabaseUrl: LEDGER_CONFIG.supabaseUrl,
   supabaseServiceRoleKey: LEDGER_CONFIG.supabaseServiceRoleKey,
   publicApiUrl: "https://api.limen.example",
+  publicSiteOrigin: "https://limen.example",
 };
 
 describe("GitHub App production runtime wiring", () => {
@@ -87,5 +88,6 @@ describe("GitHub App production runtime wiring", () => {
     expect(options.githubRepositoryApi).toBeDefined();
     expect(options.githubEvaluationApi).toBeDefined();
     expect(options.githubIntegrationHealthApi).toBeDefined();
+    expect(options.cors).toEqual({ allowedOrigin: "https://limen.example" });
   });
 });

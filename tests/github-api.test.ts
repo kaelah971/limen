@@ -469,6 +469,7 @@ afterEach(async () => {
 async function startAuthorizationServer(
   store: FakeAuthorizationStore,
   client: UserAuthClient,
+  corsOrigin?: string,
 ): Promise<string> {
   const server = createLedgerServer({
     ledger: {
@@ -480,6 +481,7 @@ async function startAuthorizationServer(
       authClient: client,
       store,
     },
+    ...(corsOrigin === undefined ? {} : { cors: { allowedOrigin: corsOrigin } }),
   });
   servers.push(server);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
@@ -491,10 +493,33 @@ async function postBind(
   url: string,
   installationId: number | string = INSTALLATION_ID,
   token: string | null = "valid-token",
+  origin?: string,
 ): Promise<Response> {
+  const headers: Record<string, string> = token === null
+    ? {}
+    : { authorization: `Bearer ${token}` };
+  if (origin !== undefined) {
+    headers.origin = origin;
+  }
   return fetch(`${url}/v1/github/installations/${installationId}/bind`, {
     method: "POST",
-    headers: token === null ? {} : { authorization: `Bearer ${token}` },
+    headers,
+  });
+}
+
+async function preflight(
+  url: string,
+  path: string,
+  origin: string,
+  method: "GET" | "POST",
+): Promise<Response> {
+  return fetch(`${url}${path}`, {
+    method: "OPTIONS",
+    headers: {
+      origin,
+      "access-control-request-method": method,
+      "access-control-request-headers": "Authorization, Content-Type",
+    },
   });
 }
 
@@ -562,6 +587,69 @@ describe("GitHub user authentication", () => {
 });
 
 describe("GitHub installation authorization", () => {
+  it("supports trusted browser preflights and returns CORS headers on bind responses", async () => {
+    const trustedOrigin = "https://limen-mu.vercel.app";
+    const store = new FakeAuthorizationStore();
+    store.installations.set(INSTALLATION_ID, {
+      installationId: INSTALLATION_ID,
+      installedByGithubUserId: GITHUB_USER_ID,
+      boundByAuthUserId: null,
+      connectionState: "ACTIVE",
+    });
+    const url = await startAuthorizationServer(
+      store,
+      authClient({ user: githubAuthUser(), error: null }),
+      trustedOrigin,
+    );
+    const browserRoutes = [
+      [`/v1/github/installations/${INSTALLATION_ID}/bind`, "POST"],
+      ["/v1/github/repositories", "GET"],
+      ["/v1/github/repositories/301", "GET"],
+      ["/v1/github/repositories/301/setup-preview", "GET"],
+      ["/v1/github/repositories/301/setup-pr", "POST"],
+    ] as const;
+
+    for (const [path, method] of browserRoutes) {
+      const response = await preflight(url, path, trustedOrigin, method);
+
+      expect(response.status).toBe(204);
+      expect(response.headers.get("access-control-allow-origin")).toBe(trustedOrigin);
+      expect(response.headers.get("access-control-allow-methods")).toBe("GET, POST, OPTIONS");
+      expect(response.headers.get("access-control-allow-headers")).toBe(
+        "Authorization, Content-Type",
+      );
+      expect(response.headers.get("vary")).toContain("Origin");
+    }
+
+    const bindResponse = await postBind(url, INSTALLATION_ID, "valid-token", trustedOrigin);
+
+    expect(bindResponse.status).toBe(200);
+    expect(bindResponse.headers.get("access-control-allow-origin")).toBe(trustedOrigin);
+    expect(bindResponse.headers.get("vary")).toContain("Origin");
+  });
+
+  it("does not approve unknown browser origins or return a wildcard", async () => {
+    const store = new FakeAuthorizationStore();
+    const url = await startAuthorizationServer(
+      store,
+      authClient({ user: githubAuthUser(), error: null }),
+      "https://limen-mu.vercel.app",
+    );
+
+    const response = await preflight(
+      url,
+      `/v1/github/installations/${INSTALLATION_ID}/bind`,
+      "https://attacker.example",
+      "POST",
+    );
+
+    expect(response.status).toBe(403);
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    expect(response.headers.get("access-control-allow-methods")).toBeNull();
+    expect(response.headers.get("access-control-allow-headers")).toBeNull();
+    expect(response.headers.get("access-control-allow-origin")).not.toBe("*");
+  });
+
   it("rejects a missing bearer token at the bind endpoint", async () => {
     const store = new FakeAuthorizationStore();
     const url = await startAuthorizationServer(

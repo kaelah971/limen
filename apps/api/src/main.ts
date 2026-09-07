@@ -40,6 +40,9 @@ const server = createLedgerServer({
     authClient: client,
     store: githubStore,
   },
+  cors: {
+    allowedOrigin: githubDeploymentConfig.publicSiteOrigin,
+  },
   githubRepositoryApi: {
     authClient: client,
     store: githubStore,

@@ -28,6 +28,7 @@ const VALID_DEPLOYMENT_ENVIRONMENT: Record<string, string | undefined> = {
   SUPABASE_URL: "https://limen.supabase.co",
   SUPABASE_SERVICE_ROLE_KEY: "service-role-secret",
   LIMEN_PUBLIC_API_URL: "https://api.limen.example",
+  LIMEN_SITE_URL: "https://limen.example",
 };
 
 function environmentWith(
@@ -191,10 +192,16 @@ describe("GitHub App deployment configuration", () => {
       supabaseUrl: "https://limen.supabase.co",
       supabaseServiceRoleKey: "service-role-secret",
       publicApiUrl: "https://api.limen.example",
+      publicSiteOrigin: "https://limen.example",
     });
   });
 
-  it.each(["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "LIMEN_PUBLIC_API_URL"])(
+  it.each([
+    "SUPABASE_URL",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "LIMEN_PUBLIC_API_URL",
+    "LIMEN_SITE_URL",
+  ])(
     "requires %s without echoing its value",
     (key) => {
       const environment = { ...VALID_DEPLOYMENT_ENVIRONMENT };
@@ -211,12 +218,24 @@ describe("GitHub App deployment configuration", () => {
     })).toThrow(/LIMEN_PUBLIC_API_URL/);
   });
 
+  it("normalizes the canonical public site URL and requires HTTPS for hosted sites", () => {
+    expect(loadGitHubAppDeploymentConfig({
+      ...VALID_DEPLOYMENT_ENVIRONMENT,
+      LIMEN_SITE_URL: "https://limen.example/install",
+    }).publicSiteOrigin).toBe("https://limen.example");
+    expect(() => loadGitHubAppDeploymentConfig({
+      ...VALID_DEPLOYMENT_ENVIRONMENT,
+      LIMEN_SITE_URL: "http://limen.example",
+    })).toThrow(/LIMEN_SITE_URL/);
+  });
+
   it("uses the canonical public web environment names", async () => {
     const environmentExample = await readFile(".env.example", "utf8");
 
     expect(environmentExample).toContain("NEXT_PUBLIC_SUPABASE_URL=");
     expect(environmentExample).toContain("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=");
     expect(environmentExample).toContain("NEXT_PUBLIC_GITHUB_APP_SLUG=");
+    expect(environmentExample).toContain("LIMEN_SITE_URL=");
     expect(environmentExample).not.toContain("NEXT_PUBLIC_SUPABASE_ANON_KEY");
     expect(environmentExample).not.toContain("NEXT_PUBLIC_LIMEN_API_URL");
   });

@@ -18,6 +18,7 @@ export interface GitHubAppDeploymentConfig {
   supabaseUrl: string;
   supabaseServiceRoleKey: string;
   publicApiUrl: string;
+  publicSiteOrigin: string;
 }
 
 const EnvironmentSchema = z.object({
@@ -83,6 +84,16 @@ function deploymentPublicApiUrl(
   return value.replace(/\/+$/, "");
 }
 
+function deploymentPublicSiteOrigin(
+  environment: Record<string, string | undefined>,
+): string {
+  const value = requiredDeploymentValue(environment, "LIMEN_SITE_URL");
+  return parseOutboundUrl(value, {
+    name: "LIMEN_SITE_URL",
+    allowHttpHosts: LOCAL_HOSTS,
+  }).origin;
+}
+
 export function loadLedgerApiConfig(
   environment: Record<string, string | undefined> = process.env,
 ): LedgerApiConfig {
@@ -118,5 +129,6 @@ export function loadGitHubAppDeploymentConfig(
       "SUPABASE_SERVICE_ROLE_KEY",
     ),
     publicApiUrl: deploymentPublicApiUrl(environment),
+    publicSiteOrigin: deploymentPublicSiteOrigin(environment),
   };
 }

@@ -46,11 +46,16 @@ import {
 } from "./github-app-routes";
 
 const DEFAULT_MAX_BODY_BYTES = 2 * 1024 * 1024;
+const BROWSER_CORS_METHODS = "GET, POST, OPTIONS";
+const BROWSER_CORS_HEADERS = "Authorization, Content-Type";
 
 export interface LedgerServerOptions {
   ledger: EvidenceLedger;
   ingestToken: string;
   receipts?: EvidenceReceiptStore;
+  cors?: {
+    allowedOrigin: string;
+  };
   githubWebhook?: GitHubWebhookRouteOptions;
   githubInstallationBind?: GitHubInstallationBindRouteOptions;
   githubEvaluationApi?: GitHubEvaluationRouteOptions;
@@ -214,6 +219,70 @@ function requestPath(request: IncomingMessage): string[] {
   return url.pathname.split("/").filter(Boolean);
 }
 
+function isBrowserCorsPath(path: readonly string[]): boolean {
+  if (path[0] !== "v1" || path[1] !== "github") {
+    return false;
+  }
+  if (path[2] === "installations" && path.length === 5 && path[4] === "bind") {
+    return true;
+  }
+  return path[2] === "repositories"
+    && (
+      path.length === 3
+      || path.length === 4
+      || (path.length === 5 && (path[4] === "setup-preview" || path[4] === "setup-pr"))
+    );
+}
+
+function setCorsHeaders(response: ServerResponse, origin: string): void {
+  response.setHeader("Access-Control-Allow-Origin", origin);
+  response.setHeader("Access-Control-Allow-Methods", BROWSER_CORS_METHODS);
+  response.setHeader("Access-Control-Allow-Headers", BROWSER_CORS_HEADERS);
+  response.setHeader("Vary", "Origin");
+}
+
+function applyCorsPolicy(
+  request: IncomingMessage,
+  response: ServerResponse,
+  options: LedgerServerOptions,
+): number | undefined {
+  if (options.cors === undefined) {
+    return undefined;
+  }
+
+  let path: string[];
+  try {
+    path = requestPath(request);
+  } catch {
+    return undefined;
+  }
+  if (!isBrowserCorsPath(path)) {
+    return undefined;
+  }
+
+  const origin = typeof request.headers.origin === "string" ? request.headers.origin : undefined;
+  if (origin !== undefined) {
+    response.setHeader("Vary", "Origin");
+  }
+
+  if (request.method === "OPTIONS") {
+    if (origin !== options.cors.allowedOrigin) {
+      response.statusCode = 403;
+      response.end();
+      return response.statusCode;
+    }
+    setCorsHeaders(response, origin);
+    response.statusCode = 204;
+    response.end();
+    return response.statusCode;
+  }
+
+  if (origin === options.cors.allowedOrigin) {
+    setCorsHeaders(response, origin);
+  }
+  return undefined;
+}
+
 async function persistRun(
   request: IncomingMessage,
   options: LedgerServerOptions,
@@ -368,6 +437,18 @@ async function handleRequest(
     },
   );
   try {
+    const corsStatus = applyCorsPolicy(request, response, options);
+    if (corsStatus !== undefined) {
+      if (corsStatus >= 400) {
+        requestStage.failure(undefined, {
+          httpStatus: corsStatus,
+          errorCode: "CORS_ORIGIN_NOT_ALLOWED",
+        });
+      } else {
+        requestStage.success({ httpStatus: corsStatus });
+      }
+      return;
+    }
     const path = requestPath(request);
     if (request.method === "GET" && path.length === 1 && path[0] === "health") {
       sendJson(response, 200, { status: "ok" });
