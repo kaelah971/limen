@@ -28,9 +28,12 @@ const EnvironmentSchema = z.object({
   LIMEN_INGEST_TOKEN: z.string().trim().min(1),
   LIMEN_API_HOST: z.string().trim().min(1).max(255)
     .regex(/^[^\u0000-\u001F\u007F-\u009F]+$/)
-    .default("127.0.0.1"),
-  LIMEN_API_PORT: z.coerce.number().int().min(1).max(65_535).default(8787),
+    .default("0.0.0.0"),
+  PORT: z.string().optional(),
+  LIMEN_API_PORT: z.string().optional(),
 });
+
+const ApiPortSchema = z.coerce.number().int().min(1).max(65_535);
 
 function isAllowedSupabaseUrl(value: string): boolean {
   try {
@@ -88,12 +91,19 @@ export function loadLedgerApiConfig(
     throw new Error("Ledger API configuration is invalid.");
   }
 
+  const port = ApiPortSchema.safeParse(
+    parsed.data.PORT ?? parsed.data.LIMEN_API_PORT ?? "8787",
+  );
+  if (!port.success) {
+    throw new Error("Ledger API configuration is invalid.");
+  }
+
   return {
     supabaseUrl: parsed.data.SUPABASE_URL,
     supabaseServiceRoleKey: parsed.data.SUPABASE_SERVICE_ROLE_KEY,
     ingestToken: parsed.data.LIMEN_INGEST_TOKEN,
     host: parsed.data.LIMEN_API_HOST,
-    port: parsed.data.LIMEN_API_PORT,
+    port: port.data,
   };
 }
 

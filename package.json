@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "api:dev": "tsx apps/api/src/main.ts"
+    "api:dev": "tsx apps/api/src/main.ts",
+    "api:start": "tsx apps/api/src/main.ts"
   },
   "dependencies": {
     "@actions/core": "^3.0.1",

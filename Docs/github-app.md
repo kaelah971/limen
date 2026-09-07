@@ -56,7 +56,37 @@ Set these values in the server-side deployment environment. Do not expose them t
 | `SUPABASE_SERVICE_ROLE_KEY` | Required server-only Supabase service-role key |
 | `LIMEN_PUBLIC_API_URL` | Required public API base URL; HTTPS in deployed environments, localhost HTTP only for development |
 
-The API deployment also uses the existing ledger variables `LIMEN_INGEST_TOKEN`, `LIMEN_API_HOST`, and `LIMEN_API_PORT`. Keep `LIMEN_INGEST_TOKEN` separate from the GitHub App webhook secret and from the Action-side `LIMEN_LEDGER_TOKEN`.
+The API deployment also uses the existing ledger variable `LIMEN_INGEST_TOKEN`. Keep it separate from the GitHub App webhook secret and from the Action-side `LIMEN_LEDGER_TOKEN`.
+
+## Railway API Deployment
+
+The API is deployed as a long-lived Node service on Railway. It remains in this repository and is deployed from the repository root.
+
+| Contract | Value |
+| --- | --- |
+| Hosting | Railway long-lived Node service |
+| Repository | This Limen repository |
+| Root | Repository root |
+| Start command | `npm run api:start` |
+| Port | Railway-provided `PORT` |
+| Host | `0.0.0.0` unless `LIMEN_API_HOST` explicitly overrides it |
+| Public domain | Generated after deployment |
+| Health path | `/health` |
+
+Required API variables:
+
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `LIMEN_INGEST_TOKEN`
+- `GITHUB_APP_ID`
+- `GITHUB_APP_SLUG`
+- `GITHUB_APP_PRIVATE_KEY`
+- `GITHUB_WEBHOOK_SECRET`
+- `LIMEN_GITHUB_OIDC_AUDIENCE`
+- `LIMEN_ACTION_SHA`
+- `LIMEN_PUBLIC_API_URL`
+
+`LIMEN_API_PORT` is not required on Railway because the service supplies `PORT`. `LIMEN_API_HOST` is also optional because the runtime defaults to `0.0.0.0`. API secrets remain server-only; `/health` returns only `{ "status": "ok" }` and startup does not dump environment values.
 
 `loadGitHubAppDeploymentConfig()` validates the GitHub App values, the Supabase service-role boundary, and the public API URL without logging secret values. The GitHub package loader separately normalizes the PEM key and validates the App ID, slug, webhook secret, OIDC audience, and Action SHA.
 

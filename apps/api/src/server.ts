@@ -99,6 +99,9 @@ function handleUnhandledRequestError(response: ServerResponse): void {
 function routeTemplate(request: IncomingMessage): string {
   try {
     const path = requestPath(request);
+    if (path.length === 1 && path[0] === "health") {
+      return "/health";
+    }
     if (path[0] !== "v1") {
       return "unknown";
     }
@@ -366,6 +369,11 @@ async function handleRequest(
   );
   try {
     const path = requestPath(request);
+    if (request.method === "GET" && path.length === 1 && path[0] === "health") {
+      sendJson(response, 200, { status: "ok" });
+      requestStage.success({ httpStatus: 200 });
+      return;
+    }
     if (request.method === "POST" && path.length === 3 && path[0] === "v1" && path[1] === "ledger" && path[2] === "runs") {
       sendJson(response, 200, await persistRun(request, options));
       requestStage.success({ httpStatus: 200 });
