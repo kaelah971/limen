@@ -13,7 +13,7 @@ export interface GitHubRepositoryMetadata {
   ownerLogin: string;
   repositoryName: string;
   fullName: string;
-  defaultBranch: string;
+  defaultBranch: string | null;
 }
 
 export interface InstallationCreatedInput {
@@ -50,7 +50,7 @@ export interface GitHubRepositoryRecord {
   ownerLogin: string;
   repositoryName: string;
   fullName: string;
-  defaultBranch: string;
+  defaultBranch: string | null;
   lifecycleState: RepositoryLifecycleState;
   latestDecision: LimenReleaseDecision | null;
   latestEvaluationAt: string | null;
@@ -292,6 +292,10 @@ function requiredRowText(value: unknown): string | null {
   return text === "" ? null : text;
 }
 
+function nullableRowText(value: unknown): string | null {
+  return value === null ? null : requiredRowText(value);
+}
+
 function repositoryLifecycleState(value: unknown): RepositoryLifecycleState | null {
   return value === "SETUP_REQUIRED"
     || value === "SETUP_PR_OPEN"
@@ -359,7 +363,7 @@ function repositoryRecord(value: unknown): GitHubRepositoryRecord {
   const ownerLogin = requiredRowText(row.owner_login);
   const repositoryName = requiredRowText(row.repository_name);
   const fullName = requiredRowText(row.full_name);
-  const defaultBranch = requiredRowText(row.default_branch);
+  const defaultBranch = nullableRowText(row.default_branch);
   const lifecycleState = repositoryLifecycleState(row.lifecycle_state);
   const latestDecision = releaseDecision(row.latest_decision);
   const latestEvaluationAt = row.latest_evaluation_at === null || row.latest_evaluation_at === undefined
@@ -373,7 +377,7 @@ function repositoryRecord(value: unknown): GitHubRepositoryRecord {
     || ownerLogin === null
     || repositoryName === null
     || fullName === null
-    || defaultBranch === null
+    || (row.default_branch !== null && defaultBranch === null)
     || lifecycleState === null
     || (row.latest_decision !== null && row.latest_decision !== undefined && latestDecision === null)
     || (row.latest_evaluation_at !== null && row.latest_evaluation_at !== undefined && latestEvaluationAt === null)

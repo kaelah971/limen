@@ -18,7 +18,7 @@ export interface SetupRepository {
   owner: string;
   name: string;
   fullName: string;
-  defaultBranch: string;
+  defaultBranch: string | null;
 }
 
 export interface SetupGenerationConfig {
@@ -209,13 +209,14 @@ function repositoryInput(repository: SetupRepository) {
 async function fileExists(
   client: GitHubInstallationApi,
   repository: SetupRepository,
+  defaultBranch: string,
   path: SetupFilePath,
 ): Promise<boolean> {
   try {
     const result = await client.getRepositoryFile({
       ...repositoryInput(repository),
       path,
-      ref: repository.defaultBranch,
+      ref: defaultBranch,
     });
     if (result.type !== "file" || result.path !== path) {
       throw new SetupInspectionError();
@@ -237,9 +238,12 @@ async function inspectWithClient(
   config: SetupGenerationConfig,
   client: GitHubInstallationApi,
 ): Promise<SetupInspection> {
-  const policyYmlExists = await fileExists(client, repository, "limen.yml");
-  const policyYamlExists = await fileExists(client, repository, "limen.yaml");
-  const workflowExists = await fileExists(client, repository, WORKFLOW_PATH);
+  const defaultBranch = repository.defaultBranch ?? (await client.getDefaultBranch(
+    repositoryInput(repository),
+  )).branchName;
+  const policyYmlExists = await fileExists(client, repository, defaultBranch, "limen.yml");
+  const policyYamlExists = await fileExists(client, repository, defaultBranch, "limen.yaml");
+  const workflowExists = await fileExists(client, repository, defaultBranch, WORKFLOW_PATH);
   const files: SetupFilePreview[] = [];
   const filesToCreate: SetupFilePath[] = [];
 

@@ -67,7 +67,7 @@ export interface LimenRepository {
   owner: string;
   name: string;
   fullName: string;
-  defaultBranch: string;
+  defaultBranch: string | null;
   lifecycleState: RepositoryLifecycleState;
   latestDecision: LimenReleaseDecision | null;
   latestEvaluationAt: string | null;
@@ -268,7 +268,9 @@ function parseRepository(value: unknown): LimenRepository {
   const owner = boundedText(row?.owner, 100);
   const name = boundedText(row?.name, 100);
   const fullName = boundedText(row?.fullName, 201);
-  const defaultBranch = boundedText(row?.defaultBranch, 255);
+  const defaultBranch = row?.defaultBranch === null || row?.defaultBranch === undefined
+    ? null
+    : boundedText(row.defaultBranch, 255);
   const state = lifecycleState(row?.lifecycleState);
   const latestEvaluationAt = row?.latestEvaluationAt === null || row?.latestEvaluationAt === undefined
     ? null
@@ -279,7 +281,7 @@ function parseRepository(value: unknown): LimenRepository {
     || owner === null
     || name === null
     || fullName === null
-    || defaultBranch === null
+    || (row?.defaultBranch !== null && defaultBranch === null)
     || state === null
     || (row?.latestEvaluationAt !== null && row?.latestEvaluationAt !== undefined && latestEvaluationAt === null)
     || (row?.latestDecision !== null && row?.latestDecision !== undefined && latestDecision === null)

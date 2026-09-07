@@ -41,8 +41,8 @@ function githubRepositoryPayload(metadata: GitHubRepositoryMetadata) {
     id: metadata.repositoryId,
     name: metadata.repositoryName,
     full_name: metadata.fullName,
-    default_branch: metadata.defaultBranch,
-    owner: { login: metadata.ownerLogin },
+    node_id: `MDEwOlJlcG9zaXRvcnk${metadata.repositoryId}`,
+    private: false,
   };
 }
 
@@ -59,8 +59,11 @@ function installationCreatedPayload(
         login: "limen-owner",
         type: "Organization",
       },
-      repositories: repositories.map(githubRepositoryPayload),
+      repository_selection: "selected",
+      target_id: 501,
+      target_type: "Organization",
     },
+    repositories: repositories.map(githubRepositoryPayload),
     sender: {
       id: INSTALLER_GITHUB_USER_ID,
       login: "installer",
@@ -293,7 +296,34 @@ describe("GitHub webhook lifecycle", () => {
     });
     expect(store.repositories.get(FIRST_REPOSITORY_ID)).toMatchObject({
       installationId: INSTALLATION_ID,
+      defaultBranch: null,
       lifecycleState: "SETUP_REQUIRED",
+    });
+  });
+
+  it("accepts the personal-user installation account form", async () => {
+    const store = new FakeGitHubAppStore();
+    const { url } = await startServer(store);
+    const payload = installationCreatedPayload([], INSTALLATION_ID + 1);
+    const installation = payload.installation as Record<string, unknown>;
+    installation.account = {
+      id: 601,
+      login: "limen-user",
+      type: "User",
+    };
+    installation.target_id = 601;
+    installation.target_type = "User";
+
+    const response = await postWebhook(url, Buffer.from(JSON.stringify(payload)), {
+      "X-GitHub-Delivery": "installation-created-user",
+    });
+
+    expect(response.status).toBe(200);
+    expect(store.installations.get(INSTALLATION_ID + 1)).toMatchObject({
+      accountId: 601,
+      accountLogin: "limen-user",
+      accountType: "User",
+      connectionState: "ACTIVE",
     });
   });
 

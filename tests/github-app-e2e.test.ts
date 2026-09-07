@@ -113,8 +113,8 @@ function repositoryPayload(metadata: GitHubRepositoryMetadata): Record<string, u
     id: metadata.repositoryId,
     name: metadata.repositoryName,
     full_name: metadata.fullName,
-    default_branch: metadata.defaultBranch,
-    owner: { login: metadata.ownerLogin },
+    node_id: `MDEwOlJlcG9zaXRvcnk${metadata.repositoryId}`,
+    private: false,
   };
 }
 
@@ -129,8 +129,11 @@ function installationCreatedPayload(): Record<string, unknown> {
         login: "limen-demo-org",
         type: "Organization",
       },
-      repositories: [repositoryPayload(metadata)],
+      repository_selection: "selected",
+      target_id: ACCOUNT_ID,
+      target_type: "Organization",
     },
+    repositories: [repositoryPayload(metadata)],
     sender: {
       id: INSTALLER_GITHUB_USER_ID,
       login: "installer",
@@ -880,7 +883,7 @@ describe("P18 deterministic GitHub App onboarding fixture", () => {
         owner: "kaelah971",
         name: "limen-demo",
         fullName: "kaelah971/limen-demo",
-        defaultBranch: "main",
+        defaultBranch: null,
         lifecycleState: "SETUP_REQUIRED",
         latestDecision: null,
         latestEvaluationAt: null,

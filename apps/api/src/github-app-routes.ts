@@ -330,6 +330,10 @@ function requiredText(value: unknown): string {
   return value.trim();
 }
 
+function optionalText(value: unknown): string | null {
+  return value === null || value === undefined ? null : requiredText(value);
+}
+
 function positiveInteger(value: unknown): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
     throw new GitHubWebhookRequestError(
@@ -357,7 +361,7 @@ function repositoryMetadata(value: unknown): GitHubRepositoryMetadata {
     ownerLogin: requiredText(ownerLogin),
     repositoryName: requiredText(repository.name),
     fullName,
-    defaultBranch: requiredText(repository.default_branch),
+    defaultBranch: optionalText(repository.default_branch),
   };
 }
 
@@ -390,9 +394,7 @@ function installationCreatedInput(
       "GitHub webhook payload is invalid.",
     );
   }
-  const repositories = installation.repositories === undefined
-    ? (Array.isArray(payload.repositories) ? payload.repositories : [])
-    : installation.repositories;
+  const repositories = payload.repositories === undefined ? [] : payload.repositories;
   return {
     installationId: positiveInteger(installation.id),
     accountId: positiveInteger(account.id),

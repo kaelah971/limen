@@ -19,6 +19,7 @@ const REPOSITORY_ID = 301;
 const INSTALLATION_TOKEN = "installation-token-that-must-not-escape";
 const GITHUB_APP_PRIVATE_KEY = "private-key-that-must-not-escape";
 const ACTION_SHA = "1111111111111111111111111111111111111111";
+const DEFAULT_BRANCH = "main";
 
 const POLICY_CONTENT = `production:
   block_severity:
@@ -64,7 +65,7 @@ const REPOSITORY: SetupRepository = {
   owner: "kaelah971",
   name: "limen",
   fullName: "kaelah971/limen",
-  defaultBranch: "main",
+  defaultBranch: DEFAULT_BRANCH,
 };
 
 const SETUP_CONFIG = {
@@ -230,7 +231,7 @@ describe("GitHub installation client", () => {
         owner: REPOSITORY.owner,
         repo: REPOSITORY.name,
         path: "limen.yml",
-        ref: REPOSITORY.defaultBranch,
+        ref: DEFAULT_BRANCH,
       });
     });
 
@@ -252,7 +253,7 @@ describe("GitHub installation client", () => {
         owner: REPOSITORY.owner,
         repo: REPOSITORY.name,
         path: "limen.yml",
-        ref: REPOSITORY.defaultBranch,
+        ref: DEFAULT_BRANCH,
       });
     });
 
@@ -260,7 +261,7 @@ describe("GitHub installation client", () => {
       owner: REPOSITORY.owner,
       repo: REPOSITORY.name,
       path: "limen.yml",
-      ref: REPOSITORY.defaultBranch,
+      ref: DEFAULT_BRANCH,
     })).rejects.toMatchObject({ code: "GITHUB_INSTALLATION_REQUEST_FAILED" });
     expect(transport.calls).toHaveLength(1);
   });
@@ -295,7 +296,7 @@ describe("GitHub installation client", () => {
         owner: REPOSITORY.owner,
         repo: REPOSITORY.name,
         path: "limen.yml",
-        ref: REPOSITORY.defaultBranch,
+        ref: DEFAULT_BRANCH,
       }),
     ).catch((caught) => caught);
 
@@ -358,7 +359,7 @@ describe("GitHub setup preview", () => {
       "getRepositoryFile",
     ]);
     expect(transport.calls.every((call) =>
-      (call.input as { ref?: string }).ref === REPOSITORY.defaultBranch,
+      (call.input as { ref?: string }).ref === DEFAULT_BRANCH,
     )).toBe(true);
   });
 

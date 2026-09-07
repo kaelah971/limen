@@ -258,7 +258,7 @@ export function RepositoryClient({ apiBaseUrl, repositoryId }: RepositoryClientP
         <div>
           <p className="eyebrow">Repository control</p>
           <h1>{repository.fullName}</h1>
-          <p className="setup-hero-support">Default branch: <code>{repository.defaultBranch}</code></p>
+          <p className="setup-hero-support">Default branch: <code>{repository.defaultBranch ?? "Not available yet"}</code></p>
         </div>
         <RepositoryStatus state={repository.lifecycleState} />
       </header>
