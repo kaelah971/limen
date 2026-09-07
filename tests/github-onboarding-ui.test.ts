@@ -207,6 +207,24 @@ describe("Limen API client", () => {
     });
     expect(fetcher.mock.calls.map(([, init]) => init?.method)).toEqual(["GET", "GET", "POST"]);
   });
+
+  it("accepts merged setup PR metadata for a configured repository", async () => {
+    const configuredRepository = {
+      ...REPOSITORY,
+      lifecycleState: "CONFIGURED" as const,
+      setupPullRequest: {
+        number: 1,
+        url: "https://github.com/kaelah971/limen/pull/1",
+        state: "MERGED" as const,
+      },
+    };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse(200, configuredRepository),
+    );
+    const api = createLimenApi("https://api.example.test", fetcher);
+
+    await expect(api.getRepository(301, ACCESS_TOKEN)).resolves.toEqual(configuredRepository);
+  });
 });
 
 describe("GitHub onboarding UI contracts", () => {

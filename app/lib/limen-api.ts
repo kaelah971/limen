@@ -59,7 +59,7 @@ export class LimenApiError extends Error {
 export interface LimenSetupPullRequest {
   number: number;
   url: string;
-  state: "OPEN";
+  state: "OPEN" | "MERGED" | "CLOSED";
 }
 
 export interface LimenRepository {
@@ -249,17 +249,26 @@ function safeGitHubPullRequestUrl(value: unknown): string | null {
   }
 }
 
-function parseSetupPullRequest(value: unknown): LimenSetupPullRequest | null {
+function parseSetupPullRequest(
+  value: unknown,
+  allowTerminalStates = false,
+): LimenSetupPullRequest | null {
   if (value === null) {
     return null;
   }
   const row = objectValue(value);
   const number = positiveNumber(row?.number);
   const url = safeGitHubPullRequestUrl(row?.url);
-  if (number === null || url === null || row?.state !== "OPEN") {
+  const state = row?.state;
+  if (
+    number === null
+    || url === null
+    || (state !== "OPEN" && state !== "MERGED" && state !== "CLOSED")
+    || (!allowTerminalStates && state !== "OPEN")
+  ) {
     throw new LimenApiError(502, "LIMEN_RESPONSE_INVALID", "Limen returned an invalid response.");
   }
-  return { number, url, state: "OPEN" };
+  return { number, url, state };
 }
 
 function parseRepository(value: unknown): LimenRepository {
@@ -297,7 +306,7 @@ function parseRepository(value: unknown): LimenRepository {
     lifecycleState: state,
     latestDecision,
     latestEvaluationAt,
-    setupPullRequest: parseSetupPullRequest(row?.setupPullRequest),
+    setupPullRequest: parseSetupPullRequest(row?.setupPullRequest, true),
   };
 }
 
