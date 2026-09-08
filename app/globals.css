@@ -109,6 +109,10 @@ input:focus-visible {
   background: #bdbdbd;
 }
 
+.page-frame:has(.hero) {
+  background: #ffffff;
+}
+
 .site-header {
   position: relative;
   z-index: 10;
@@ -450,7 +454,7 @@ code,
 
 .threshold-line::before,
 .threshold-line::after {
-  content: "THE THRESHOLD.";
+  content: attr(data-glitch-copy);
   position: absolute;
   inset: 0;
   pointer-events: none;
@@ -486,7 +490,7 @@ code,
 .hero-support {
   max-width: 560px;
   margin: 8px auto 0;
-  color: var(--muted);
+  color: var(--muted-dark);
   font-size: 14px;
   line-height: 21px;
 }

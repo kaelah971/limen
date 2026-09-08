@@ -18,6 +18,9 @@ inputs:
   expected-network:
     description: Optional x402 network. Falls back to TELEGRAPH_EXPECTED_NETWORK or Base Sepolia.
     required: false
+  limen-api-url:
+    description: "Optional Limen API base URL for OIDC-authenticated repository status reporting"
+    required: false
   ledger-url:
     description: Optional Limen Evidence Ledger ingestion URL. Falls back to LIMEN_LEDGER_URL.
     required: false

@@ -31,6 +31,10 @@ import {
   type ReceiptSnapshot,
 } from "../packages/receipts/src";
 import {
+  buildLimenWorkflow,
+  DEFAULT_LIMEN_POLICY,
+} from "../packages/github-app/src";
+import {
   CURRENT_ACTION_REFERENCE,
   CURRENT_TELEGRAPH_ENGINE_URL,
   CURRENT_TELEGRAPH_NETWORK,
@@ -38,6 +42,14 @@ import {
   MINIMAL_POLICY,
   RECOMMENDED_POLICY,
 } from "../app/lib/setup-contract";
+
+const { SETUP_ACTION_SHA, SETUP_API_URL } = vi.hoisted(() => {
+  const actionSha = "a91d36bfe8eaab5d95f791e39449878239bf948d";
+  const apiUrl = "https://api.example.test";
+  process.env.LIMEN_ACTION_SHA = actionSha;
+  process.env.LIMEN_PUBLIC_API_URL = apiUrl;
+  return { SETUP_ACTION_SHA: actionSha, SETUP_API_URL: apiUrl };
+});
 
 const HOLD_SNAPSHOT: ReceiptSnapshot = {
   schemaVersion: RECEIPT_SCHEMA_VERSION,
@@ -316,8 +328,9 @@ describe("P7 route and accessibility boundaries", () => {
   });
 
   it("keeps navigation targets and external link semantics explicit", async () => {
-    const [home, brand, demo, demoTrace, receipt, evidence] = await Promise.all([
+    const [home, homeStyles, brand, demo, demoTrace, receipt, evidence] = await Promise.all([
       readFile("app/page.tsx", "utf8"),
+      readFile("app/globals.css", "utf8"),
       readFile("app/components/brand.tsx", "utf8"),
       readFile("app/demo/page.tsx", "utf8"),
       readFile("app/components/demo-trace.tsx", "utf8"),
@@ -325,12 +338,26 @@ describe("P7 route and accessibility boundaries", () => {
       readFile("app/components/evidence-primitives.tsx", "utf8"),
     ]);
     expect(home).toContain('href="/demo"');
+    expect(home).toContain('href="/install"');
+    expect(home).toContain("GitHub-native release control");
+    expect(home).toContain("EVIDENCE DECIDES.");
+    expect(home).toContain("FIXES GET VERIFIED.");
+    expect(home).toContain('data-glitch-copy="FIXES GET VERIFIED."');
+    expect(home).not.toContain("THE THRESHOLD.");
+    expect(homeStyles).toContain("content: attr(data-glitch-copy);");
+    expect(homeStyles).not.toContain("THE THRESHOLD.");
+    expect(home).toContain("Limen combines repository context, independent security evidence, and deterministic policy to decide whether code should ship — then keeps blocked releases on a path toward verified remediation.");
+    expect(home).toContain("PASS, HOLD, or REVIEW is the decision. Verified remediation is the loop that closes it.");
+    expect(home).toContain("Deterministic Policy");
+    expect(home).toContain("Install Limen");
+    expect(home).toContain("Inspect real proof");
     expect(home).toContain("href={`/receipt/${ACTIVE_HOLD_RECEIPT_ID}`}");
     expect(home).toContain("Update the dependency to a version that clears all blocking findings under the current policy.");
     expect(home).not.toContain("beyond 4.17.21");
     expect(brand).toContain('href="/proof"');
     expect(brand).toContain("href={`/receipt/${ACTIVE_HOLD_RECEIPT_ID}`}");
-    expect(brand).toContain('href="/setup"');
+    expect(brand).toContain('href="/install"');
+    expect(brand).toContain("Install Limen");
     expect(brand).toContain('rel="noreferrer noopener"');
     expect(demo).toContain("DEMO_PULL_REQUEST_URL");
     expect(demo).toContain("ACTIVE_HOLD_RECEIPT_ID");
@@ -358,16 +385,25 @@ describe("P7 route and accessibility boundaries", () => {
     ]);
     const docs = `${readme}\n${actionDocs}\n${exampleWorkflow}`;
 
-    expect(CURRENT_ACTION_REFERENCE).toBe("kaelah971/limen@a91d36bfe8eaab5d95f791e39449878239bf948d");
+    expect(CURRENT_ACTION_REFERENCE).toBe(`kaelah971/limen@${SETUP_ACTION_SHA}`);
     expect(CURRENT_TELEGRAPH_ENGINE_URL).toBe("http://13.237.89.59:7044/engine/v1/ask");
     expect(CURRENT_TELEGRAPH_NETWORK).toBe("eip155:84532");
     expect(CURRENT_WORKFLOW).toContain("pull_request:");
     expect(CURRENT_WORKFLOW).toContain("contents: read");
+    expect(CURRENT_WORKFLOW).toContain("id-token: write");
     expect(CURRENT_WORKFLOW).toContain(`uses: ${CURRENT_ACTION_REFERENCE}`);
     expect(CURRENT_WORKFLOW).toContain("github-token: ${{ github.token }}");
     expect(CURRENT_WORKFLOW).toContain("telegraph-private-key: ${{ secrets.LIMEN_TELEGRAPH_PRIVATE_KEY }}");
     expect(CURRENT_WORKFLOW).toContain("telegraph-engine-url: ${{ vars.TELEGRAPH_ENGINE_URL }}");
-    expect(RECOMMENDED_POLICY).toContain("missing_external_evidence: review");
+    expect(CURRENT_WORKFLOW).toContain(`limen-api-url: ${SETUP_API_URL}`);
+    expect(CURRENT_WORKFLOW).not.toContain("actions/checkout");
+    expect(CURRENT_WORKFLOW).not.toContain("pull_request_target");
+    expect(CURRENT_WORKFLOW).not.toContain(CURRENT_TELEGRAPH_ENGINE_URL);
+    expect(CURRENT_WORKFLOW).toBe(buildLimenWorkflow({
+      actionSha: SETUP_ACTION_SHA,
+      limenApiUrl: SETUP_API_URL,
+    }));
+    expect(RECOMMENDED_POLICY).toBe(DEFAULT_LIMEN_POLICY.trimEnd());
     expect(MINIMAL_POLICY).toContain("block_severity:");
 
     expect(setupPage).toContain('export const metadata = getPageMetadata(');
@@ -376,6 +412,8 @@ describe("P7 route and accessibility boundaries", () => {
     expect(setupPage).toContain("HOLD");
     expect(setupPage).toContain("REVIEW");
     expect(setupPage).toContain("setup failure is not");
+    expect(setupPage).toContain('href="/install"');
+    expect(setupPage).toContain("Install with GitHub App");
     expect(setupPage).toContain("TESTNET / DEMO ONLY");
     expect(setupPage).toContain("currently uses plain HTTP");
     expect(setupPage).toContain("Do not use this endpoint for production payment traffic.");
@@ -422,7 +460,7 @@ describe("P7 route and accessibility boundaries", () => {
     expect(config).toContain("nosniff");
     expect(config).toContain("strict-origin-when-cross-origin");
     expect(config).toContain("frame-ancestors 'none'");
-    expect(config).toContain("connect-src 'self'");
+    expect(config).toContain("connect-src ${connectSources}");
   });
 
   it("defines the responsive evidence path and reduced-motion behavior", async () => {

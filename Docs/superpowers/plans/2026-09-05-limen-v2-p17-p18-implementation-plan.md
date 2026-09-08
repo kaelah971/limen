@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, Next.js App Router, Node.js, Vitest, Supabase/Postgres, GitHub Apps REST API, GitHub webhooks, GitHub Actions OIDC, `@actions/core`, `jose`, existing Limen packages and Action bundle.
 
-**Spec:** `docs/superpowers/specs/2026-09-05-limen-v2-p17-p18-design.md`
+**Spec:** `Docs/superpowers/specs/2026-09-05-limen-v2-p17-p18-design.md`
 
 ## Global Constraints
 
@@ -50,8 +50,8 @@
 
 ### New files
 
-- `docs/superpowers/specs/2026-09-05-limen-v2-p17-p18-design.md`
-- `docs/superpowers/plans/2026-09-05-limen-v2-p17-p18-implementation-plan.md`
+- `Docs/superpowers/specs/2026-09-05-limen-v2-p17-p18-design.md`
+- `Docs/superpowers/plans/2026-09-05-limen-v2-p17-p18-implementation-plan.md`
 - `Docs/github-app.md`
 - `Docs/submission-snapshot-telegraph-track3-2026.md`
 - `packages/github-app/package.json`
@@ -93,8 +93,8 @@ If any expected existing path above does not exist in the current checkout, stop
 
 **Files:**
 - Create: `Docs/submission-snapshot-telegraph-track3-2026.md`
-- Create: `docs/superpowers/specs/2026-09-05-limen-v2-p17-p18-design.md`
-- Create: `docs/superpowers/plans/2026-09-05-limen-v2-p17-p18-implementation-plan.md`
+- Create: `Docs/superpowers/specs/2026-09-05-limen-v2-p17-p18-design.md`
+- Create: `Docs/superpowers/plans/2026-09-05-limen-v2-p17-p18-implementation-plan.md`
 
 **Interfaces:**
 - Consumes: submitted commit `6a763acf0f58c03f42b0d121103640691ff96825`.
@@ -161,15 +161,15 @@ V2 work begins after this snapshot and may change `main` without changing the ta
 Place the approved files at:
 
 ```text
-docs/superpowers/specs/2026-09-05-limen-v2-p17-p18-design.md
-docs/superpowers/plans/2026-09-05-limen-v2-p17-p18-implementation-plan.md
+Docs/superpowers/specs/2026-09-05-limen-v2-p17-p18-design.md
+Docs/superpowers/plans/2026-09-05-limen-v2-p17-p18-implementation-plan.md
 ```
 
 Then run:
 
 ```bash
 grep -F "6a763acf0f58c03f42b0d121103640691ff96825" Docs/submission-snapshot-telegraph-track3-2026.md
-grep -F "Workflows: Read and Write" docs/superpowers/specs/2026-09-05-limen-v2-p17-p18-design.md
+grep -F "Workflows: Read and Write" Docs/superpowers/specs/2026-09-05-limen-v2-p17-p18-design.md
 ```
 
 Expected: both commands find exactly the intended lines.
@@ -177,7 +177,7 @@ Expected: both commands find exactly the intended lines.
 - [ ] **Step 5: Commit P17 documentation**
 
 ```bash
-git add Docs/submission-snapshot-telegraph-track3-2026.md docs/superpowers/specs/2026-09-05-limen-v2-p17-p18-design.md docs/superpowers/plans/2026-09-05-limen-v2-p17-p18-implementation-plan.md
+git add Docs/submission-snapshot-telegraph-track3-2026.md Docs/superpowers/specs/2026-09-05-limen-v2-p17-p18-design.md Docs/superpowers/plans/2026-09-05-limen-v2-p17-p18-implementation-plan.md
 git commit -m "docs: freeze Telegraph submission and plan Limen V2"
 ```
 

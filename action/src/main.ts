@@ -1,6 +1,7 @@
 import * as actionsCore from "@actions/core";
 import { context as githubContext } from "@actions/github";
 import {
+  ConfigurationError,
   createObservabilityLogger,
   isLimenError,
   redactString,
@@ -16,9 +17,10 @@ import {
   type TelegraphClient,
 } from "../../packages/telegraph/src";
 import { parsePullRequestContext } from "./context";
-import { readActionInputs } from "./inputs";
+import { readActionInputs, readOptionalLimenApiUrl } from "./inputs";
 import { loadBaseCommitPolicy } from "./policy";
 import { persistActionLedger } from "./persist";
+import { reportLimenEvaluation, reportLimenIntegrationFault } from "./limen-callback";
 import { createLimenRunId, orchestrateLimenRun } from "./orchestrate";
 import { setActionOutputs } from "./outputs";
 import { renderSummary } from "./summary";
@@ -42,6 +44,32 @@ export function formatActionError(error: unknown): string {
     }
   }
   return `Limen failed: ${serialized.code}. ${serialized.message}${details}`;
+}
+
+export function isDeterministicConfigurationError(error: unknown): boolean {
+  return error instanceof ConfigurationError
+    && error.details?.field === "TELEGRAPH_PRIVATE_KEY";
+}
+
+async function reportConfigurationFailure(
+  error: unknown,
+  limenApiUrl: string | undefined,
+): Promise<void> {
+  if (!isDeterministicConfigurationError(error)) {
+    return;
+  }
+  const callback = await reportLimenIntegrationFault({
+    limenApiUrl,
+    repositoryId: process.env.GITHUB_REPOSITORY_ID,
+    githubRunId: githubContext.runId,
+    githubRunAttempt: githubContext.runAttempt,
+    workflowRef: process.env.GITHUB_WORKFLOW_REF,
+    code: "CONFIGURATION_INVALID",
+    observedAt: new Date().toISOString(),
+  });
+  if (callback.status === "failed") {
+    actionsCore.warning("Limen configuration failed, but integration health reporting failed.");
+  }
 }
 
 export function applyActionOutcome(
@@ -110,8 +138,14 @@ export async function runAction(): Promise<void> {
       "event-validation",
       correlation,
     );
-    let inputs: ActionInputs;
+    let inputs: ReturnType<typeof readActionInputs>;
     let actionContext: ReturnType<typeof parsePullRequestContext>;
+    let callbackLimenApiUrl: string | undefined;
+    try {
+      callbackLimenApiUrl = readOptionalLimenApiUrl();
+    } catch {
+      callbackLimenApiUrl = undefined;
+    }
     try {
       inputs = readActionInputs();
       actionContext = parsePullRequestContext({
@@ -135,6 +169,7 @@ export async function runAction(): Promise<void> {
       Object.assign(workflowCorrelation, correlation);
       validationStage.success(correlation);
     } catch (error) {
+      await reportConfigurationFailure(error, callbackLimenApiUrl);
       validationStage.failure(error);
       throw error;
     }
@@ -199,6 +234,24 @@ export async function runAction(): Promise<void> {
     } catch (error) {
       summaryStage.failure(error);
       throw error;
+    }
+    try {
+      const callback = await reportLimenEvaluation({
+        limenApiUrl: inputs.limenApiUrl,
+        repositoryId: process.env.GITHUB_REPOSITORY_ID,
+        githubRunId: outputResult.context.githubRunId,
+        githubRunAttempt: outputResult.context.githubRunAttempt,
+        workflowRef: process.env.GITHUB_WORKFLOW_REF,
+        commitSha: outputResult.headSha,
+        decision: outputResult.overallDecision,
+        receiptId: null,
+        evaluatedAt: outputResult.evaluatedAt,
+      });
+      if (callback.status === "failed") {
+        actionsCore.warning("Limen evaluation completed, but repository status reporting failed.");
+      }
+    } catch {
+      actionsCore.warning("Limen evaluation completed, but repository status reporting failed.");
     }
     applyActionOutcome(outputResult);
     const workflowFields = {

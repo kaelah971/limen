@@ -32,13 +32,35 @@ import {
   ReceiptPersistenceError,
   ReceiptRevokedError,
 } from "./receipt-repository";
+import {
+  handleGitHubInstallationBind,
+  handleGitHubEvaluation,
+  handleGitHubIntegrationHealth,
+  handleGitHubRepositoryRequest,
+  handleGitHubWebhook,
+  type GitHubInstallationBindRouteOptions,
+  type GitHubEvaluationRouteOptions,
+  type GitHubIntegrationHealthRouteOptions,
+  type GitHubRepositoryRouteOptions,
+  type GitHubWebhookRouteOptions,
+} from "./github-app-routes";
 
 const DEFAULT_MAX_BODY_BYTES = 2 * 1024 * 1024;
+const BROWSER_CORS_METHODS = "GET, POST, OPTIONS";
+const BROWSER_CORS_HEADERS = "Authorization, Content-Type";
 
 export interface LedgerServerOptions {
   ledger: EvidenceLedger;
   ingestToken: string;
   receipts?: EvidenceReceiptStore;
+  cors?: {
+    allowedOrigin: string;
+  };
+  githubWebhook?: GitHubWebhookRouteOptions;
+  githubInstallationBind?: GitHubInstallationBindRouteOptions;
+  githubEvaluationApi?: GitHubEvaluationRouteOptions;
+  githubIntegrationHealthApi?: GitHubIntegrationHealthRouteOptions;
+  githubRepositoryApi?: GitHubRepositoryRouteOptions;
   maxBodyBytes?: number;
   observability?: LimenObservabilityLogger;
   requestIdFactory?: () => string;
@@ -82,6 +104,9 @@ function handleUnhandledRequestError(response: ServerResponse): void {
 function routeTemplate(request: IncomingMessage): string {
   try {
     const path = requestPath(request);
+    if (path.length === 1 && path[0] === "health") {
+      return "/health";
+    }
     if (path[0] !== "v1") {
       return "unknown";
     }
@@ -97,6 +122,40 @@ function routeTemplate(request: IncomingMessage): string {
       }
       if (path.length === 4 && path[3] === "revoke") {
         return "/v1/receipts/:id/revoke";
+      }
+    }
+    if (path[1] === "github" && path[2] === "webhooks" && path.length === 3) {
+      return "/v1/github/webhooks";
+    }
+    if (path[1] === "github" && path[2] === "evaluations" && path.length === 3) {
+      return "/v1/github/evaluations";
+    }
+    if (path[1] === "github" && path[2] === "integration-health" && path.length === 3) {
+      return "/v1/github/integration-health";
+    }
+    if (
+      path[1] === "github"
+      && path[2] === "installations"
+      && path.length === 5
+      && path[4] === "bind"
+    ) {
+      return "/v1/github/installations/:installationId/bind";
+    }
+    if (path[1] === "github" && path[2] === "repositories") {
+      if (path.length === 3) {
+        return "/v1/github/repositories";
+      }
+      if (path.length === 4) {
+        return "/v1/github/repositories/:repositoryId";
+      }
+      if (path.length === 5 && path[4] === "setup-preview") {
+        return "/v1/github/repositories/:repositoryId/setup-preview";
+      }
+      if (path.length === 5 && path[4] === "setup-pr") {
+        return "/v1/github/repositories/:repositoryId/setup-pr";
+      }
+      if (path.length === 5 && path[4] === "evaluations") {
+        return "/v1/github/repositories/:repositoryId/evaluations";
       }
     }
     return "unknown";
@@ -158,6 +217,70 @@ function requestPath(request: IncomingMessage): string[] {
     throw new LedgerApiRequestError(400, "LEDGER_INVALID_PATH", "Ledger request path is invalid.");
   }
   return url.pathname.split("/").filter(Boolean);
+}
+
+function isBrowserCorsPath(path: readonly string[]): boolean {
+  if (path[0] !== "v1" || path[1] !== "github") {
+    return false;
+  }
+  if (path[2] === "installations" && path.length === 5 && path[4] === "bind") {
+    return true;
+  }
+  return path[2] === "repositories"
+    && (
+      path.length === 3
+      || path.length === 4
+      || (path.length === 5 && (path[4] === "setup-preview" || path[4] === "setup-pr"))
+    );
+}
+
+function setCorsHeaders(response: ServerResponse, origin: string): void {
+  response.setHeader("Access-Control-Allow-Origin", origin);
+  response.setHeader("Access-Control-Allow-Methods", BROWSER_CORS_METHODS);
+  response.setHeader("Access-Control-Allow-Headers", BROWSER_CORS_HEADERS);
+  response.setHeader("Vary", "Origin");
+}
+
+function applyCorsPolicy(
+  request: IncomingMessage,
+  response: ServerResponse,
+  options: LedgerServerOptions,
+): number | undefined {
+  if (options.cors === undefined) {
+    return undefined;
+  }
+
+  let path: string[];
+  try {
+    path = requestPath(request);
+  } catch {
+    return undefined;
+  }
+  if (!isBrowserCorsPath(path)) {
+    return undefined;
+  }
+
+  const origin = typeof request.headers.origin === "string" ? request.headers.origin : undefined;
+  if (origin !== undefined) {
+    response.setHeader("Vary", "Origin");
+  }
+
+  if (request.method === "OPTIONS") {
+    if (origin !== options.cors.allowedOrigin) {
+      response.statusCode = 403;
+      response.end();
+      return response.statusCode;
+    }
+    setCorsHeaders(response, origin);
+    response.statusCode = 204;
+    response.end();
+    return response.statusCode;
+  }
+
+  if (origin === options.cors.allowedOrigin) {
+    setCorsHeaders(response, origin);
+  }
+  return undefined;
 }
 
 async function persistRun(
@@ -314,7 +437,24 @@ async function handleRequest(
     },
   );
   try {
+    const corsStatus = applyCorsPolicy(request, response, options);
+    if (corsStatus !== undefined) {
+      if (corsStatus >= 400) {
+        requestStage.failure(undefined, {
+          httpStatus: corsStatus,
+          errorCode: "CORS_ORIGIN_NOT_ALLOWED",
+        });
+      } else {
+        requestStage.success({ httpStatus: corsStatus });
+      }
+      return;
+    }
     const path = requestPath(request);
+    if (request.method === "GET" && path.length === 1 && path[0] === "health") {
+      sendJson(response, 200, { status: "ok" });
+      requestStage.success({ httpStatus: 200 });
+      return;
+    }
     if (request.method === "POST" && path.length === 3 && path[0] === "v1" && path[1] === "ledger" && path[2] === "runs") {
       sendJson(response, 200, await persistRun(request, options));
       requestStage.success({ httpStatus: 200 });
@@ -338,6 +478,135 @@ async function handleRequest(
     if (request.method === "POST" && path.length === 4 && path[0] === "v1" && path[1] === "receipts" && path[3] === "revoke") {
       sendJson(response, 200, await revokeReceipt(request, options, path[2] ?? ""));
       requestStage.success({ httpStatus: 200 });
+      return;
+    }
+    if (request.method === "POST" && path.length === 3 && path[0] === "v1" && path[1] === "github" && path[2] === "webhooks") {
+      if (options.githubWebhook === undefined) {
+        throw new LedgerApiRequestError(
+          503,
+          "GITHUB_WEBHOOK_NOT_CONFIGURED",
+          "GitHub webhook processing is not configured.",
+        );
+      }
+      const webhookResponse = await handleGitHubWebhook(request, options.githubWebhook);
+      sendJson(response, webhookResponse.status, webhookResponse.body);
+      if (webhookResponse.status >= 400) {
+        requestStage.failure(undefined, {
+          httpStatus: webhookResponse.status,
+          errorCode: String(webhookResponse.body.code ?? "GITHUB_WEBHOOK_ERROR"),
+        });
+      } else {
+        requestStage.success({ httpStatus: webhookResponse.status });
+      }
+      return;
+    }
+    if (request.method === "POST" && path.length === 3 && path[0] === "v1" && path[1] === "github" && path[2] === "evaluations") {
+      if (options.githubEvaluationApi === undefined) {
+        throw new LedgerApiRequestError(
+          503,
+          "GITHUB_EVALUATION_API_NOT_CONFIGURED",
+          "GitHub evaluation processing is not configured.",
+        );
+      }
+      const evaluationResponse = await handleGitHubEvaluation(request, options.githubEvaluationApi);
+      sendJson(response, evaluationResponse.status, evaluationResponse.body);
+      if (evaluationResponse.status >= 400) {
+        requestStage.failure(undefined, {
+          httpStatus: evaluationResponse.status,
+          errorCode: String(evaluationResponse.body.code ?? "GITHUB_EVALUATION_ERROR"),
+        });
+      } else {
+        requestStage.success({ httpStatus: evaluationResponse.status });
+      }
+      return;
+    }
+    if (request.method === "POST" && path.length === 3 && path[0] === "v1" && path[1] === "github" && path[2] === "integration-health") {
+      if (options.githubIntegrationHealthApi === undefined) {
+        throw new LedgerApiRequestError(
+          503,
+          "GITHUB_INTEGRATION_HEALTH_NOT_CONFIGURED",
+          "GitHub integration health processing is not configured.",
+        );
+      }
+      const healthResponse = await handleGitHubIntegrationHealth(request, options.githubIntegrationHealthApi);
+      sendJson(response, healthResponse.status, healthResponse.body);
+      if (healthResponse.status >= 400) {
+        requestStage.failure(undefined, {
+          httpStatus: healthResponse.status,
+          errorCode: String(healthResponse.body.code ?? "GITHUB_INTEGRATION_HEALTH_ERROR"),
+        });
+      } else {
+        requestStage.success({ httpStatus: healthResponse.status });
+      }
+      return;
+    }
+    if (
+      request.method === "POST"
+      && path.length === 5
+      && path[0] === "v1"
+      && path[1] === "github"
+      && path[2] === "installations"
+      && path[4] === "bind"
+    ) {
+      if (options.githubInstallationBind === undefined) {
+        throw new LedgerApiRequestError(
+          503,
+          "GITHUB_INSTALLATION_BIND_NOT_CONFIGURED",
+          "GitHub installation binding is not configured.",
+        );
+      }
+      const bindResponse = await handleGitHubInstallationBind(
+        request,
+        path[3] ?? "",
+        options.githubInstallationBind,
+      );
+      sendJson(response, bindResponse.status, bindResponse.body);
+      if (bindResponse.status >= 400) {
+        requestStage.failure(undefined, {
+          httpStatus: bindResponse.status,
+          errorCode: String(bindResponse.body.code ?? "GITHUB_INSTALLATION_BIND_ERROR"),
+        });
+      } else {
+        requestStage.success({ httpStatus: bindResponse.status });
+      }
+      return;
+    }
+    if (
+      path[0] === "v1"
+      && path[1] === "github"
+      && path[2] === "repositories"
+      && (
+        path.length === 3
+        || path.length === 4
+        || (path.length === 5 && (
+          path[4] === "setup-preview"
+          || path[4] === "setup-pr"
+          || path[4] === "evaluations"
+        ))
+      )
+    ) {
+      if (options.githubRepositoryApi === undefined) {
+        throw new LedgerApiRequestError(
+          503,
+          "GITHUB_REPOSITORY_API_NOT_CONFIGURED",
+          "GitHub repository APIs are not configured.",
+        );
+      }
+      const repositoryResponse = await handleGitHubRepositoryRequest(
+        request,
+        path,
+        options.githubRepositoryApi,
+      );
+      sendJson(response, repositoryResponse.status, repositoryResponse.body);
+      if (repositoryResponse.status >= 400) {
+        requestStage.failure(undefined, {
+          httpStatus: repositoryResponse.status,
+          errorCode: repositoryResponse.diagnosticCode
+            ?? String(repositoryResponse.body.code ?? "GITHUB_REPOSITORY_API_ERROR"),
+        });
+      } else {
+        requestStage.success({ httpStatus: repositoryResponse.status });
+      }
       return;
     }
     throw new LedgerApiRequestError(404, "LEDGER_ROUTE_NOT_FOUND", "Ledger route was not found.");
